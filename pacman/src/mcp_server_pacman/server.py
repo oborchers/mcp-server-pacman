@@ -2,10 +2,12 @@ from typing import Annotated, Dict, List, Optional, Literal
 import json
 import httpx
 import asyncio
+import time
+import traceback
 from html.parser import HTMLParser
 from cachetools import TTLCache
 from functools import wraps
-
+from loguru import logger
 from mcp.shared.exceptions import McpError
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -22,13 +24,20 @@ from mcp.types import (
 )
 from pydantic import BaseModel, Field
 
-DEFAULT_USER_AGENT = (
-    "ModelContextProtocol/1.0 Pacman (+https://github.com/modelcontextprotocol/servers)"
-)
+# Remove default handler to allow configuration from __main__.py
+logger.remove()
+
+# Logger is configured in __main__.py
+
+# Server metadata
+SERVER_NAME = "Pacman"  # Changed to match test expectations
+SERVER_VERSION = ""  # Empty since tests don't expect a version
+DEFAULT_USER_AGENT = f"ModelContextProtocol/1.0 {SERVER_NAME} (+https://github.com/modelcontextprotocol/servers)"
 
 # HTTP request cache (maxsize=500, ttl=1 hour)
 _http_cache = TTLCache(maxsize=500, ttl=3600)
 _cache_lock = asyncio.Lock()
+_cache_stats = {"hits": 0, "misses": 0, "bypasses": 0, "total_calls": 0}
 
 # Flag to disable caching in tests
 ENABLE_CACHE = True
@@ -39,31 +48,89 @@ def async_cached(cache):
 
     Since cachetools doesn't natively support async functions, we need
     a custom decorator that handles the async/await pattern.
+
+    Features:
+    - Tracks cache hits/misses/bypasses for better observability
+    - Thread-safe with asyncio lock for concurrent access
+    - Configurable bypass for testing
     """
 
     def decorator(func):
         @wraps(func)
         async def wrapper(*args, **kwargs):
+            start_time = time.time()
+            args_repr = (
+                f"({args[1:] if args else ''}{', ' if args and kwargs else ''}{kwargs})"
+            )
+            func_repr = f"{func.__name__}{args_repr}"
+
+            # Update total calls statistic
+            async with _cache_lock:
+                _cache_stats["total_calls"] += 1
+
             # Check if caching should be bypassed
             bypass_cache = kwargs.pop("_bypass_cache", False)
             if bypass_cache or not ENABLE_CACHE:
-                return await func(*args, **kwargs)
+                logger.debug(f"Cache bypassed for {func_repr}")
+
+                # Update bypass statistic
+                async with _cache_lock:
+                    _cache_stats["bypasses"] += 1
+
+                # Execute function without caching
+                try:
+                    result = await func(*args, **kwargs)
+                    execution_time = time.time() - start_time
+                    logger.debug(
+                        f"Executed {func_repr} in {execution_time:.4f}s (cache bypassed)"
+                    )
+                    return result
+                except Exception as e:
+                    logger.error(f"Error executing {func_repr}: {str(e)}")
+                    logger.debug(f"Exception details: {traceback.format_exc()}")
+                    raise
 
             # Create a cache key from the function name and arguments
             key = str(args) + str(kwargs)
 
             # Check if the result is already in the cache
             if key in cache:
+                # Update hit statistic
+                async with _cache_lock:
+                    _cache_stats["hits"] += 1
+
+                execution_time = time.time() - start_time
+                logger.info(f"Cache HIT for {func_repr} in {execution_time:.4f}s")
+                logger.debug(f"Cache stats: {_cache_stats}")
                 return cache[key]
 
-            # Call the original function
-            result = await func(*args, **kwargs)
-
-            # Update the cache with the result (with lock to avoid race conditions)
+            # Update miss statistic
             async with _cache_lock:
-                cache[key] = result
+                _cache_stats["misses"] += 1
 
-            return result
+            logger.info(f"Cache MISS for {func_repr}")
+
+            # Call the original function
+            try:
+                result = await func(*args, **kwargs)
+
+                # Update the cache with the result (with lock to avoid race conditions)
+                async with _cache_lock:
+                    cache[key] = result
+
+                execution_time = time.time() - start_time
+                logger.info(
+                    f"Cached result for {func_repr} (executed in {execution_time:.4f}s)"
+                )
+                logger.debug(
+                    f"Cache size: {len(cache)}/{cache.maxsize}, TTL: {cache.ttl}s"
+                )
+                return result
+
+            except Exception as e:
+                logger.error(f"Error executing {func_repr}: {str(e)}")
+                logger.debug(f"Exception details: {traceback.format_exc()}")
+                raise
 
         return wrapper
 
@@ -459,11 +526,15 @@ async def serve(custom_user_agent: str | None = None) -> None:
     Args:
         custom_user_agent: Optional custom User-Agent string to use for requests
     """
+    logger.info("Starting mcp-pacman server")
+
     global DEFAULT_USER_AGENT
     if custom_user_agent:
+        logger.info(f"Using custom User-Agent: {custom_user_agent}")
         DEFAULT_USER_AGENT = custom_user_agent
 
     server = Server("mcp-pacman")
+    logger.info("MCP Server initialized")
 
     @server.list_tools()
     async def list_tools() -> list[Tool]:
@@ -556,19 +627,29 @@ async def serve(custom_user_agent: str | None = None) -> None:
 
     @server.call_tool()
     async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+        logger.info(f"Tool call: {name} with arguments: {arguments}")
+
         if name == "search_package":
             try:
                 args = PackageSearch(**arguments)
+                logger.debug(f"Validated search package args: {args}")
             except ValueError as e:
+                logger.error(f"Invalid search package parameters: {str(e)}")
                 raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e)))
 
             if args.index == "pypi":
+                logger.info(f"Searching PyPI for '{args.query}' (limit={args.limit})")
                 results = await search_pypi(args.query, args.limit)
             elif args.index == "npm":
+                logger.info(f"Searching npm for '{args.query}' (limit={args.limit})")
                 results = await search_npm(args.query, args.limit)
             elif args.index == "crates":
+                logger.info(
+                    f"Searching crates.io for '{args.query}' (limit={args.limit})"
+                )
                 results = await search_crates(args.query, args.limit)
             else:
+                logger.error(f"Unsupported package index: {args.index}")
                 raise McpError(
                     ErrorData(
                         code=INVALID_PARAMS,
@@ -576,6 +657,9 @@ async def serve(custom_user_agent: str | None = None) -> None:
                     )
                 )
 
+            logger.info(
+                f"Found {len(results)} results for '{args.query}' on {args.index}"
+            )
             return [
                 TextContent(
                     type="text",
@@ -586,8 +670,15 @@ async def serve(custom_user_agent: str | None = None) -> None:
         elif name == "package_info":
             try:
                 args = PackageInfo(**arguments)
+                logger.debug(f"Validated package info args: {args}")
             except ValueError as e:
+                logger.error(f"Invalid package info parameters: {str(e)}")
                 raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e)))
+
+            logger.info(
+                f"Getting package info for {args.name} on {args.index}"
+                + (f" (version={args.version})" if args.version else "")
+            )
 
             if args.index == "pypi":
                 info = await get_pypi_info(args.name, args.version)
@@ -596,6 +687,7 @@ async def serve(custom_user_agent: str | None = None) -> None:
             elif args.index == "crates":
                 info = await get_crates_info(args.name, args.version)
             else:
+                logger.error(f"Unsupported package index: {args.index}")
                 raise McpError(
                     ErrorData(
                         code=INVALID_PARAMS,
@@ -603,6 +695,9 @@ async def serve(custom_user_agent: str | None = None) -> None:
                     )
                 )
 
+            logger.info(
+                f"Successfully retrieved package info for {args.name} on {args.index}"
+            )
             return [
                 TextContent(
                     type="text",
@@ -610,19 +705,27 @@ async def serve(custom_user_agent: str | None = None) -> None:
                 )
             ]
 
+        logger.error(f"Unknown tool: {name}")
         raise McpError(ErrorData(code=INVALID_PARAMS, message=f"Unknown tool: {name}"))
 
     @server.get_prompt()
     async def get_prompt(name: str, arguments: dict | None) -> GetPromptResult:
+        logger.info(f"Prompt request: {name} with arguments: {arguments}")
+
         if name == "search_pypi":
             if not arguments or "query" not in arguments:
+                logger.error(
+                    "Missing required 'query' parameter for search_pypi prompt"
+                )
                 raise McpError(
                     ErrorData(code=INVALID_PARAMS, message="Search query is required")
                 )
 
             query = arguments["query"]
+            logger.info(f"Getting PyPI search prompt for query: '{query}'")
             try:
                 results = await search_pypi(query, 5)
+                logger.info(f"Found {len(results)} results for PyPI search: '{query}'")
                 return GetPromptResult(
                     description=f"Search results for '{query}' on PyPI",
                     messages=[
@@ -636,6 +739,7 @@ async def serve(custom_user_agent: str | None = None) -> None:
                     ],
                 )
             except McpError as e:
+                logger.error(f"Error generating search_pypi prompt: {str(e)}")
                 return GetPromptResult(
                     description=f"Failed to search for '{query}'",
                     messages=[
@@ -647,15 +751,23 @@ async def serve(custom_user_agent: str | None = None) -> None:
 
         elif name == "pypi_info":
             if not arguments or "name" not in arguments:
+                logger.error("Missing required 'name' parameter for pypi_info prompt")
                 raise McpError(
                     ErrorData(code=INVALID_PARAMS, message="Package name is required")
                 )
 
             package_name = arguments["name"]
             version = arguments.get("version")
+            logger.info(
+                f"Getting PyPI package info prompt for {package_name}"
+                + (f" (version={version})" if version else "")
+            )
 
             try:
                 info = await get_pypi_info(package_name, version)
+                logger.info(
+                    f"Successfully retrieved PyPI package info for {package_name}"
+                )
                 return GetPromptResult(
                     description=f"Information for {package_name} on PyPI",
                     messages=[
@@ -669,6 +781,7 @@ async def serve(custom_user_agent: str | None = None) -> None:
                     ],
                 )
             except McpError as e:
+                logger.error(f"Error generating pypi_info prompt: {str(e)}")
                 return GetPromptResult(
                     description=f"Failed to get information for {package_name}",
                     messages=[
@@ -811,5 +924,13 @@ async def serve(custom_user_agent: str | None = None) -> None:
         )
 
     options = server.create_initialization_options()
-    async with stdio_server() as (read_stream, write_stream):
-        await server.run(read_stream, write_stream, options, raise_exceptions=True)
+    logger.info("Starting server with stdio transport")
+    try:
+        async with stdio_server() as (read_stream, write_stream):
+            logger.info("Server ready to accept connections")
+            await server.run(read_stream, write_stream, options, raise_exceptions=True)
+    except Exception as e:
+        logger.error(f"Server encountered an error: {str(e)}")
+        raise
+    finally:
+        logger.info("Server shutdown complete")
