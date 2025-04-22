@@ -1,0 +1,23 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.11.6
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: pacman-tests
+        name: pacman tests
+        entry: bash -c 'cd pacman && uv run pytest -xvs tests/'
+        language: system
+        pass_filenames: false
+        files: ^pacman/
+      
+      - id: docy-tests
+        name: docy tests
+        entry: bash -c 'cd docy && uv run pytest -xvs tests/'
+        language: system
+        pass_filenames: false
+        files: ^docy/

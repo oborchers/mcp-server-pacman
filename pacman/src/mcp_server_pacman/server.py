@@ -18,14 +18,17 @@ from mcp.types import (
 )
 from pydantic import BaseModel, Field
 
-DEFAULT_USER_AGENT = "ModelContextProtocol/1.0 Pacman (+https://github.com/modelcontextprotocol/servers)"
+DEFAULT_USER_AGENT = (
+    "ModelContextProtocol/1.0 Pacman (+https://github.com/modelcontextprotocol/servers)"
+)
 
 
 class PackageSearch(BaseModel):
     """Parameters for searching a package index."""
+
     index: Annotated[
         Literal["pypi", "npm", "crates"],
-        Field(description="Package index to search (pypi, npm, crates)")
+        Field(description="Package index to search (pypi, npm, crates)"),
     ]
     query: Annotated[str, Field(description="Package name or search query")]
     limit: Annotated[
@@ -35,20 +38,24 @@ class PackageSearch(BaseModel):
             description="Maximum number of results to return",
             gt=0,
             lt=50,
-        )
+        ),
     ]
 
 
 class PackageInfo(BaseModel):
     """Parameters for getting package information."""
+
     index: Annotated[
         Literal["pypi", "npm", "crates"],
-        Field(description="Package index to query (pypi, npm, crates)")
+        Field(description="Package index to query (pypi, npm, crates)"),
     ]
     name: Annotated[str, Field(description="Package name")]
     version: Annotated[
-        Optional[str], 
-        Field(default=None, description="Specific version to get info for (default: latest)")
+        Optional[str],
+        Field(
+            default=None,
+            description="Specific version to get info for (default: latest)",
+        ),
     ]
 
 
@@ -56,18 +63,20 @@ async def search_pypi(query: str, limit: int) -> List[Dict]:
     """Search PyPI for packages matching the query."""
     async with httpx.AsyncClient() as client:
         response = await client.get(
-            f"https://pypi.org/search/",
+            "https://pypi.org/search/",
             params={"q": query, "page": 1},
             headers={"Accept": "application/json", "User-Agent": DEFAULT_USER_AGENT},
             follow_redirects=True,
         )
-        
+
         if response.status_code != 200:
-            raise McpError(ErrorData(
-                code=INTERNAL_ERROR,
-                message=f"Failed to search PyPI - status code {response.status_code}",
-            ))
-        
+            raise McpError(
+                ErrorData(
+                    code=INTERNAL_ERROR,
+                    message=f"Failed to search PyPI - status code {response.status_code}",
+                )
+            )
+
         try:
             # PyPI doesn't have a JSON search API, so we'd need HTML parsing here
             # This is a simplified placeholder - in a real implementation, use BeautifulSoup
@@ -76,16 +85,18 @@ async def search_pypi(query: str, limit: int) -> List[Dict]:
                 {
                     "name": f"example-{i}",
                     "version": "1.0.0",
-                    "description": "This is a placeholder. Real implementation would parse PyPI HTML response."
+                    "description": "This is a placeholder. Real implementation would parse PyPI HTML response.",
                 }
                 for i in range(min(limit, 5))
             ]
             return results
         except Exception as e:
-            raise McpError(ErrorData(
-                code=INTERNAL_ERROR,
-                message=f"Failed to parse PyPI search results: {str(e)}",
-            ))
+            raise McpError(
+                ErrorData(
+                    code=INTERNAL_ERROR,
+                    message=f"Failed to parse PyPI search results: {str(e)}",
+                )
+            )
 
 
 async def get_pypi_info(name: str, version: Optional[str] = None) -> Dict:
@@ -94,19 +105,21 @@ async def get_pypi_info(name: str, version: Optional[str] = None) -> Dict:
         url = f"https://pypi.org/pypi/{name}/json"
         if version:
             url = f"https://pypi.org/pypi/{name}/{version}/json"
-            
+
         response = await client.get(
             url,
             headers={"Accept": "application/json", "User-Agent": DEFAULT_USER_AGENT},
             follow_redirects=True,
         )
-        
+
         if response.status_code != 200:
-            raise McpError(ErrorData(
-                code=INTERNAL_ERROR,
-                message=f"Failed to get package info from PyPI - status code {response.status_code}",
-            ))
-        
+            raise McpError(
+                ErrorData(
+                    code=INTERNAL_ERROR,
+                    message=f"Failed to get package info from PyPI - status code {response.status_code}",
+                )
+            )
+
         try:
             data = response.json()
             result = {
@@ -120,10 +133,12 @@ async def get_pypi_info(name: str, version: Optional[str] = None) -> Dict:
             }
             return result
         except Exception as e:
-            raise McpError(ErrorData(
-                code=INTERNAL_ERROR,
-                message=f"Failed to parse PyPI package info: {str(e)}",
-            ))
+            raise McpError(
+                ErrorData(
+                    code=INTERNAL_ERROR,
+                    message=f"Failed to parse PyPI package info: {str(e)}",
+                )
+            )
 
 
 async def search_npm(query: str, limit: int) -> List[Dict]:
@@ -135,13 +150,15 @@ async def search_npm(query: str, limit: int) -> List[Dict]:
             headers={"Accept": "application/json", "User-Agent": DEFAULT_USER_AGENT},
             follow_redirects=True,
         )
-        
+
         if response.status_code != 200:
-            raise McpError(ErrorData(
-                code=INTERNAL_ERROR,
-                message=f"Failed to search npm - status code {response.status_code}",
-            ))
-        
+            raise McpError(
+                ErrorData(
+                    code=INTERNAL_ERROR,
+                    message=f"Failed to search npm - status code {response.status_code}",
+                )
+            )
+
         try:
             data = response.json()
             results = [
@@ -149,7 +166,9 @@ async def search_npm(query: str, limit: int) -> List[Dict]:
                     "name": package["package"]["name"],
                     "version": package["package"]["version"],
                     "description": package["package"].get("description", ""),
-                    "publisher": package["package"].get("publisher", {}).get("username", ""),
+                    "publisher": package["package"]
+                    .get("publisher", {})
+                    .get("username", ""),
                     "date": package["package"].get("date", ""),
                     "links": package["package"].get("links", {}),
                 }
@@ -157,10 +176,12 @@ async def search_npm(query: str, limit: int) -> List[Dict]:
             ]
             return results
         except Exception as e:
-            raise McpError(ErrorData(
-                code=INTERNAL_ERROR,
-                message=f"Failed to parse npm search results: {str(e)}",
-            ))
+            raise McpError(
+                ErrorData(
+                    code=INTERNAL_ERROR,
+                    message=f"Failed to parse npm search results: {str(e)}",
+                )
+            )
 
 
 async def get_npm_info(name: str, version: Optional[str] = None) -> Dict:
@@ -169,22 +190,24 @@ async def get_npm_info(name: str, version: Optional[str] = None) -> Dict:
         url = f"https://registry.npmjs.org/{name}"
         if version:
             url = f"https://registry.npmjs.org/{name}/{version}"
-            
+
         response = await client.get(
             url,
             headers={"Accept": "application/json", "User-Agent": DEFAULT_USER_AGENT},
             follow_redirects=True,
         )
-        
+
         if response.status_code != 200:
-            raise McpError(ErrorData(
-                code=INTERNAL_ERROR,
-                message=f"Failed to get package info from npm - status code {response.status_code}",
-            ))
-        
+            raise McpError(
+                ErrorData(
+                    code=INTERNAL_ERROR,
+                    message=f"Failed to get package info from npm - status code {response.status_code}",
+                )
+            )
+
         try:
             data = response.json()
-            
+
             # For specific version request
             if version:
                 return {
@@ -196,11 +219,11 @@ async def get_npm_info(name: str, version: Optional[str] = None) -> Dict:
                     "license": data.get("license", ""),
                     "dependencies": data.get("dependencies", {}),
                 }
-            
+
             # For latest/all versions
             latest_version = data.get("dist-tags", {}).get("latest", "")
             latest_info = data.get("versions", {}).get(latest_version, {})
-            
+
             return {
                 "name": data.get("name", name),
                 "version": latest_version,
@@ -212,10 +235,12 @@ async def get_npm_info(name: str, version: Optional[str] = None) -> Dict:
                 "versions": list(data.get("versions", {}).keys()),
             }
         except Exception as e:
-            raise McpError(ErrorData(
-                code=INTERNAL_ERROR,
-                message=f"Failed to parse npm package info: {str(e)}",
-            ))
+            raise McpError(
+                ErrorData(
+                    code=INTERNAL_ERROR,
+                    message=f"Failed to parse npm package info: {str(e)}",
+                )
+            )
 
 
 async def search_crates(query: str, limit: int) -> List[Dict]:
@@ -227,13 +252,15 @@ async def search_crates(query: str, limit: int) -> List[Dict]:
             headers={"Accept": "application/json", "User-Agent": DEFAULT_USER_AGENT},
             follow_redirects=True,
         )
-        
+
         if response.status_code != 200:
-            raise McpError(ErrorData(
-                code=INTERNAL_ERROR,
-                message=f"Failed to search crates.io - status code {response.status_code}",
-            ))
-        
+            raise McpError(
+                ErrorData(
+                    code=INTERNAL_ERROR,
+                    message=f"Failed to search crates.io - status code {response.status_code}",
+                )
+            )
+
         try:
             data = response.json()
             results = [
@@ -249,10 +276,12 @@ async def search_crates(query: str, limit: int) -> List[Dict]:
             ]
             return results
         except Exception as e:
-            raise McpError(ErrorData(
-                code=INTERNAL_ERROR,
-                message=f"Failed to parse crates.io search results: {str(e)}",
-            ))
+            raise McpError(
+                ErrorData(
+                    code=INTERNAL_ERROR,
+                    message=f"Failed to parse crates.io search results: {str(e)}",
+                )
+            )
 
 
 async def get_crates_info(name: str, version: Optional[str] = None) -> Dict:
@@ -265,35 +294,40 @@ async def get_crates_info(name: str, version: Optional[str] = None) -> Dict:
             headers={"Accept": "application/json", "User-Agent": DEFAULT_USER_AGENT},
             follow_redirects=True,
         )
-        
+
         if response.status_code != 200:
-            raise McpError(ErrorData(
-                code=INTERNAL_ERROR,
-                message=f"Failed to get package info from crates.io - status code {response.status_code}",
-            ))
-        
+            raise McpError(
+                ErrorData(
+                    code=INTERNAL_ERROR,
+                    message=f"Failed to get package info from crates.io - status code {response.status_code}",
+                )
+            )
+
         try:
             data = response.json()
             crate = data["crate"]
-            
+
             # If a specific version was requested, get that version's details
             version_data = {}
             if version:
                 version_url = f"https://crates.io/api/v1/crates/{name}/{version}"
                 version_response = await client.get(
                     version_url,
-                    headers={"Accept": "application/json", "User-Agent": DEFAULT_USER_AGENT},
+                    headers={
+                        "Accept": "application/json",
+                        "User-Agent": DEFAULT_USER_AGENT,
+                    },
                     follow_redirects=True,
                 )
-                
+
                 if version_response.status_code == 200:
                     version_data = version_response.json().get("version", {})
-            
+
             # If no specific version, use the latest
             if not version_data and data.get("versions"):
                 version = data["versions"][0]["num"]  # Latest version
                 version_data = data["versions"][0]
-            
+
             result = {
                 "name": crate["name"],
                 "version": version or crate.get("max_version", ""),
@@ -311,10 +345,12 @@ async def get_crates_info(name: str, version: Optional[str] = None) -> Dict:
             }
             return result
         except Exception as e:
-            raise McpError(ErrorData(
-                code=INTERNAL_ERROR,
-                message=f"Failed to parse crates.io package info: {str(e)}",
-            ))
+            raise McpError(
+                ErrorData(
+                    code=INTERNAL_ERROR,
+                    message=f"Failed to parse crates.io package info: {str(e)}",
+                )
+            )
 
 
 async def serve(custom_user_agent: str | None = None) -> None:
@@ -326,7 +362,7 @@ async def serve(custom_user_agent: str | None = None) -> None:
     global DEFAULT_USER_AGENT
     if custom_user_agent:
         DEFAULT_USER_AGENT = custom_user_agent
-        
+
     server = Server("mcp-pacman")
 
     @server.list_tools()
@@ -341,7 +377,7 @@ async def serve(custom_user_agent: str | None = None) -> None:
                 name="package_info",
                 description="Get detailed information about a specific package",
                 inputSchema=PackageInfo.model_json_schema(),
-            )
+            ),
         ]
 
     @server.list_prompts()
@@ -352,7 +388,9 @@ async def serve(custom_user_agent: str | None = None) -> None:
                 description="Search for Python packages on PyPI",
                 arguments=[
                     PromptArgument(
-                        name="query", description="Package name or search query", required=True
+                        name="query",
+                        description="Package name or search query",
+                        required=True,
                     )
                 ],
             ),
@@ -373,7 +411,9 @@ async def serve(custom_user_agent: str | None = None) -> None:
                 description="Search for JavaScript packages on npm",
                 arguments=[
                     PromptArgument(
-                        name="query", description="Package name or search query", required=True
+                        name="query",
+                        description="Package name or search query",
+                        required=True,
                     )
                 ],
             ),
@@ -394,7 +434,9 @@ async def serve(custom_user_agent: str | None = None) -> None:
                 description="Search for Rust packages on crates.io",
                 arguments=[
                     PromptArgument(
-                        name="query", description="Package name or search query", required=True
+                        name="query",
+                        description="Package name or search query",
+                        required=True,
                     )
                 ],
             ),
@@ -419,7 +461,7 @@ async def serve(custom_user_agent: str | None = None) -> None:
                 args = PackageSearch(**arguments)
             except ValueError as e:
                 raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e)))
-                
+
             if args.index == "pypi":
                 results = await search_pypi(args.query, args.limit)
             elif args.index == "npm":
@@ -427,22 +469,26 @@ async def serve(custom_user_agent: str | None = None) -> None:
             elif args.index == "crates":
                 results = await search_crates(args.query, args.limit)
             else:
-                raise McpError(ErrorData(
-                    code=INVALID_PARAMS,
-                    message=f"Unsupported package index: {args.index}"
-                ))
-                
-            return [TextContent(
-                type="text",
-                text=f"Search results for '{args.query}' on {args.index}:\n{json.dumps(results, indent=2)}"
-            )]
-            
+                raise McpError(
+                    ErrorData(
+                        code=INVALID_PARAMS,
+                        message=f"Unsupported package index: {args.index}",
+                    )
+                )
+
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Search results for '{args.query}' on {args.index}:\n{json.dumps(results, indent=2)}",
+                )
+            ]
+
         elif name == "package_info":
             try:
                 args = PackageInfo(**arguments)
             except ValueError as e:
                 raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e)))
-                
+
             if args.index == "pypi":
                 info = await get_pypi_info(args.name, args.version)
             elif args.index == "npm":
@@ -450,27 +496,30 @@ async def serve(custom_user_agent: str | None = None) -> None:
             elif args.index == "crates":
                 info = await get_crates_info(args.name, args.version)
             else:
-                raise McpError(ErrorData(
-                    code=INVALID_PARAMS,
-                    message=f"Unsupported package index: {args.index}"
-                ))
-                
-            return [TextContent(
-                type="text",
-                text=f"Package information for {args.name} on {args.index}:\n{json.dumps(info, indent=2)}"
-            )]
-        
-        raise McpError(ErrorData(
-            code=INVALID_PARAMS,
-            message=f"Unknown tool: {name}"
-        ))
+                raise McpError(
+                    ErrorData(
+                        code=INVALID_PARAMS,
+                        message=f"Unsupported package index: {args.index}",
+                    )
+                )
+
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Package information for {args.name} on {args.index}:\n{json.dumps(info, indent=2)}",
+                )
+            ]
+
+        raise McpError(ErrorData(code=INVALID_PARAMS, message=f"Unknown tool: {name}"))
 
     @server.get_prompt()
     async def get_prompt(name: str, arguments: dict | None) -> GetPromptResult:
         if name == "search_pypi":
             if not arguments or "query" not in arguments:
-                raise McpError(ErrorData(code=INVALID_PARAMS, message="Search query is required"))
-                
+                raise McpError(
+                    ErrorData(code=INVALID_PARAMS, message="Search query is required")
+                )
+
             query = arguments["query"]
             try:
                 results = await search_pypi(query, 5)
@@ -481,8 +530,8 @@ async def serve(custom_user_agent: str | None = None) -> None:
                             role="user",
                             content=TextContent(
                                 type="text",
-                                text=f"Results for '{query}':\n{json.dumps(results, indent=2)}"
-                            )
+                                text=f"Results for '{query}':\n{json.dumps(results, indent=2)}",
+                            ),
                         )
                     ],
                 )
@@ -491,19 +540,20 @@ async def serve(custom_user_agent: str | None = None) -> None:
                     description=f"Failed to search for '{query}'",
                     messages=[
                         PromptMessage(
-                            role="user",
-                            content=TextContent(type="text", text=str(e))
+                            role="user", content=TextContent(type="text", text=str(e))
                         )
                     ],
                 )
-                
+
         elif name == "pypi_info":
             if not arguments or "name" not in arguments:
-                raise McpError(ErrorData(code=INVALID_PARAMS, message="Package name is required"))
-                
+                raise McpError(
+                    ErrorData(code=INVALID_PARAMS, message="Package name is required")
+                )
+
             package_name = arguments["name"]
             version = arguments.get("version")
-            
+
             try:
                 info = await get_pypi_info(package_name, version)
                 return GetPromptResult(
@@ -513,8 +563,8 @@ async def serve(custom_user_agent: str | None = None) -> None:
                             role="user",
                             content=TextContent(
                                 type="text",
-                                text=f"Package information:\n{json.dumps(info, indent=2)}"
-                            )
+                                text=f"Package information:\n{json.dumps(info, indent=2)}",
+                            ),
                         )
                     ],
                 )
@@ -523,16 +573,17 @@ async def serve(custom_user_agent: str | None = None) -> None:
                     description=f"Failed to get information for {package_name}",
                     messages=[
                         PromptMessage(
-                            role="user",
-                            content=TextContent(type="text", text=str(e))
+                            role="user", content=TextContent(type="text", text=str(e))
                         )
                     ],
                 )
-        
+
         elif name == "search_npm":
             if not arguments or "query" not in arguments:
-                raise McpError(ErrorData(code=INVALID_PARAMS, message="Search query is required"))
-                
+                raise McpError(
+                    ErrorData(code=INVALID_PARAMS, message="Search query is required")
+                )
+
             query = arguments["query"]
             try:
                 results = await search_npm(query, 5)
@@ -543,8 +594,8 @@ async def serve(custom_user_agent: str | None = None) -> None:
                             role="user",
                             content=TextContent(
                                 type="text",
-                                text=f"Results for '{query}':\n{json.dumps(results, indent=2)}"
-                            )
+                                text=f"Results for '{query}':\n{json.dumps(results, indent=2)}",
+                            ),
                         )
                     ],
                 )
@@ -553,19 +604,20 @@ async def serve(custom_user_agent: str | None = None) -> None:
                     description=f"Failed to search for '{query}'",
                     messages=[
                         PromptMessage(
-                            role="user",
-                            content=TextContent(type="text", text=str(e))
+                            role="user", content=TextContent(type="text", text=str(e))
                         )
                     ],
                 )
-                
+
         elif name == "npm_info":
             if not arguments or "name" not in arguments:
-                raise McpError(ErrorData(code=INVALID_PARAMS, message="Package name is required"))
-                
+                raise McpError(
+                    ErrorData(code=INVALID_PARAMS, message="Package name is required")
+                )
+
             package_name = arguments["name"]
             version = arguments.get("version")
-            
+
             try:
                 info = await get_npm_info(package_name, version)
                 return GetPromptResult(
@@ -575,8 +627,8 @@ async def serve(custom_user_agent: str | None = None) -> None:
                             role="user",
                             content=TextContent(
                                 type="text",
-                                text=f"Package information:\n{json.dumps(info, indent=2)}"
-                            )
+                                text=f"Package information:\n{json.dumps(info, indent=2)}",
+                            ),
                         )
                     ],
                 )
@@ -585,16 +637,17 @@ async def serve(custom_user_agent: str | None = None) -> None:
                     description=f"Failed to get information for {package_name}",
                     messages=[
                         PromptMessage(
-                            role="user",
-                            content=TextContent(type="text", text=str(e))
+                            role="user", content=TextContent(type="text", text=str(e))
                         )
                     ],
                 )
-                
+
         elif name == "search_crates":
             if not arguments or "query" not in arguments:
-                raise McpError(ErrorData(code=INVALID_PARAMS, message="Search query is required"))
-                
+                raise McpError(
+                    ErrorData(code=INVALID_PARAMS, message="Search query is required")
+                )
+
             query = arguments["query"]
             try:
                 results = await search_crates(query, 5)
@@ -605,8 +658,8 @@ async def serve(custom_user_agent: str | None = None) -> None:
                             role="user",
                             content=TextContent(
                                 type="text",
-                                text=f"Results for '{query}':\n{json.dumps(results, indent=2)}"
-                            )
+                                text=f"Results for '{query}':\n{json.dumps(results, indent=2)}",
+                            ),
                         )
                     ],
                 )
@@ -615,19 +668,20 @@ async def serve(custom_user_agent: str | None = None) -> None:
                     description=f"Failed to search for '{query}'",
                     messages=[
                         PromptMessage(
-                            role="user",
-                            content=TextContent(type="text", text=str(e))
+                            role="user", content=TextContent(type="text", text=str(e))
                         )
                     ],
                 )
-                
+
         elif name == "crates_info":
             if not arguments or "name" not in arguments:
-                raise McpError(ErrorData(code=INVALID_PARAMS, message="Package name is required"))
-                
+                raise McpError(
+                    ErrorData(code=INVALID_PARAMS, message="Package name is required")
+                )
+
             package_name = arguments["name"]
             version = arguments.get("version")
-            
+
             try:
                 info = await get_crates_info(package_name, version)
                 return GetPromptResult(
@@ -637,8 +691,8 @@ async def serve(custom_user_agent: str | None = None) -> None:
                             role="user",
                             content=TextContent(
                                 type="text",
-                                text=f"Package information:\n{json.dumps(info, indent=2)}"
-                            )
+                                text=f"Package information:\n{json.dumps(info, indent=2)}",
+                            ),
                         )
                     ],
                 )
@@ -647,17 +701,15 @@ async def serve(custom_user_agent: str | None = None) -> None:
                     description=f"Failed to get information for {package_name}",
                     messages=[
                         PromptMessage(
-                            role="user",
-                            content=TextContent(type="text", text=str(e))
+                            role="user", content=TextContent(type="text", text=str(e))
                         )
                     ],
                 )
-        
-        raise McpError(ErrorData(
-            code=INVALID_PARAMS,
-            message=f"Unknown prompt: {name}"
-        ))
-        
+
+        raise McpError(
+            ErrorData(code=INVALID_PARAMS, message=f"Unknown prompt: {name}")
+        )
+
     options = server.create_initialization_options()
     async with stdio_server() as (read_stream, write_stream):
         await server.run(read_stream, write_stream, options, raise_exceptions=True)
