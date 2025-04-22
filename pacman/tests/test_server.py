@@ -86,6 +86,19 @@ class TestPyPIFunctions(unittest.TestCase):
         # Setup mock
         mock_response = MagicMock()
         mock_response.status_code = 200
+        # Provide sample HTML that would be returned from PyPI simple index
+        mock_response.text = """
+        <html>
+          <body>
+            <a href="/simple/requests/">requests</a>
+            <a href="/simple/requestsexceptions/">requestsexceptions</a>
+            <a href="/simple/requests-cache/">requests-cache</a>
+            <a href="/simple/requests-aws4auth/">requests-aws4auth</a>
+            <a href="/simple/requests-toolbelt/">requests-toolbelt</a>
+            <a href="/simple/another-package/">another-package</a>
+          </body>
+        </html>
+        """
 
         mock_client_instance = AsyncMock()
         mock_client_instance.get.return_value = mock_response
@@ -95,10 +108,18 @@ class TestPyPIFunctions(unittest.TestCase):
         results = await search_pypi("requests", 3)
 
         # Verify calls and results
-        mock_client_instance.get.assert_called_once()
+        mock_client_instance.get.assert_called_once_with(
+            "https://pypi.org/simple/",
+            headers={
+                "Accept": "text/html",
+                "User-Agent": "ModelContextProtocol/1.0 Pacman (+https://github.com/modelcontextprotocol/servers)",
+            },
+            follow_redirects=True,
+        )
+        # Should find 5 packages with "requests" in the name, but limit to 3
         self.assertEqual(len(results), 3)
-        for i, result in enumerate(results):
-            self.assertEqual(result["name"], f"example-{i}")
+        # The first one should be 'requests' (exact match)
+        self.assertEqual(results[0]["name"], "requests")
 
     @patch("httpx.AsyncClient")
     @async_test
@@ -114,6 +135,16 @@ class TestPyPIFunctions(unittest.TestCase):
         # Execute and check for exception
         with self.assertRaises(McpError) as context:
             await search_pypi("requests", 3)
+
+        # Verify API call was made
+        mock_client_instance.get.assert_called_once_with(
+            "https://pypi.org/simple/",
+            headers={
+                "Accept": "text/html",
+                "User-Agent": "ModelContextProtocol/1.0 Pacman (+https://github.com/modelcontextprotocol/servers)",
+            },
+            follow_redirects=True,
+        )
 
         self.assertEqual(context.exception.error.code, INTERNAL_ERROR)
         self.assertIn("Failed to search PyPI", context.exception.error.message)

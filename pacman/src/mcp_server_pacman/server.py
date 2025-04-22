@@ -1,6 +1,7 @@
 from typing import Annotated, Dict, List, Optional, Literal
 import json
 import httpx
+from html.parser import HTMLParser
 
 from mcp.shared.exceptions import McpError
 from mcp.server import Server
@@ -59,13 +60,35 @@ class PackageInfo(BaseModel):
     ]
 
 
+class PyPISimpleParser(HTMLParser):
+    """Parser for PyPI's simple HTML index."""
+
+    def __init__(self):
+        super().__init__()
+        self.packages = []
+        self._current_tag = None
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "a":
+            self._current_tag = tag
+            for attr in attrs:
+                if attr[0] == "href" and attr[1].startswith("/simple/"):
+                    # Extract package name from URLs like /simple/package-name/
+                    package_name = attr[1].split("/")[2]
+                    self.packages.append(package_name)
+
+    def handle_endtag(self, tag):
+        if tag == "a":
+            self._current_tag = None
+
+
 async def search_pypi(query: str, limit: int) -> List[Dict]:
-    """Search PyPI for packages matching the query."""
+    """Search PyPI for packages matching the query using the simple index."""
     async with httpx.AsyncClient() as client:
+        # First get the full package list from the simple index
         response = await client.get(
-            "https://pypi.org/search/",
-            params={"q": query, "page": 1},
-            headers={"Accept": "application/json", "User-Agent": DEFAULT_USER_AGENT},
+            "https://pypi.org/simple/",
+            headers={"Accept": "text/html", "User-Agent": DEFAULT_USER_AGENT},
             follow_redirects=True,
         )
 
@@ -78,17 +101,42 @@ async def search_pypi(query: str, limit: int) -> List[Dict]:
             )
 
         try:
-            # PyPI doesn't have a JSON search API, so we'd need HTML parsing here
-            # This is a simplified placeholder - in a real implementation, use BeautifulSoup
-            # to extract package info from the HTML response
-            results = [
-                {
-                    "name": f"example-{i}",
-                    "version": "1.0.0",
-                    "description": "This is a placeholder. Real implementation would parse PyPI HTML response.",
-                }
-                for i in range(min(limit, 5))
+            # Parse the HTML to extract package names
+            parser = PyPISimpleParser()
+            parser.feed(response.text)
+
+            # Filter packages that match the query (case insensitive)
+            query_lower = query.lower()
+            matching_packages = [
+                pkg for pkg in parser.packages if query_lower in pkg.lower()
             ]
+
+            # Sort by relevance (exact matches first, then startswith, then contains)
+            matching_packages.sort(
+                key=lambda pkg: (
+                    0
+                    if pkg.lower() == query_lower
+                    else 1
+                    if pkg.lower().startswith(query_lower)
+                    else 2
+                )
+            )
+
+            # Limit the results
+            matching_packages = matching_packages[:limit]
+
+            # For each match, get basic details (we'll fetch more details on demand)
+            results = []
+            for pkg_name in matching_packages:
+                # Create a result entry with the information we have
+                results.append(
+                    {
+                        "name": pkg_name,
+                        "version": "latest",  # We don't have version info from the simple index
+                        "description": f"Python package: {pkg_name}",
+                    }
+                )
+
             return results
         except Exception as e:
             raise McpError(
