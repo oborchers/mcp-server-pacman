@@ -1,6 +1,6 @@
 [project]
 name = "mcp-server-pacman"
-version = "0.1.0"
+version = "0.1.1"
 description = "A Model Context Protocol server providing tools to query package indices like PyPI, npm, and crates.io"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -23,7 +23,7 @@ dependencies = [
 ]
 
 [project.scripts]
-mcp-server-pacman = "mcp_server_pacman.__main__:main"
+mcp-server-pacman = "mcp_server_pacman:main"
 
 [build-system]
 requires = ["hatchling"]

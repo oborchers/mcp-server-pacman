@@ -24,12 +24,12 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 FROM python:3.12-slim-bookworm
 
 WORKDIR /app
- 
-COPY --from=uv /root/.local /root/.local
+
 COPY --from=uv --chown=app:app /app/.venv /app/.venv
+COPY src /app/src
 
 # Place executables in the environment at the front of the path
 ENV PATH="/app/.venv/bin:$PATH"
 
-# when running the container, add --db-path and a bind mount to the host's db file
-ENTRYPOINT ["python", "-m", "src"]
+# Run the package
+ENTRYPOINT ["mcp-server-pacman"]
