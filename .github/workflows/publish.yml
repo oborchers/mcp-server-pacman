@@ -27,7 +27,7 @@ jobs:
       - name: Check pyproject.toml version
         id: check_version
         run: |
-          VERSION=$(uv run python -c "import tomli; print(tomli.loads(open('pyproject.toml', 'rb').read())['project']['version'])")
+          VERSION=$(uv run python -c "import tomli; with open('pyproject.toml', 'rb') as f: data = tomli.load(f); print(data['project']['version'])")
           echo "PYPROJECT_VERSION=$VERSION" >> $GITHUB_ENV
           
           # Compare tag version with pyproject.toml version
