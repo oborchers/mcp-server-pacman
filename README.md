@@ -70,6 +70,15 @@ After installation, you can run it as a script using:
 python -m mcp_server_pacman
 ```
 
+### Using Docker
+
+You can also use the Docker image:
+
+```
+docker pull oborchers/mcp-server-pacman:latest
+docker run -i --rm oborchers/mcp-server-pacman
+```
+
 ## Configuration
 
 ### Configure for Claude.app
@@ -96,7 +105,7 @@ Add to your Claude settings:
 "mcpServers": {
   "pacman": {
     "command": "docker",
-    "args": ["run", "-i", "--rm", "mcp/pacman"]
+    "args": ["run", "-i", "--rm", "oborchers/mcp-server-pacman:latest"]
   }
 }
 ```
@@ -149,7 +158,7 @@ Optionally, you can add it to a file called `.vscode/mcp.json` in your workspace
     "servers": {
       "pacman": {
         "command": "docker",
-        "args": ["run", "-i", "--rm", "mcp/pacman"]
+        "args": ["run", "-i", "--rm", "oborchers/mcp-server-pacman:latest"]
       }
     }
   }
@@ -180,6 +189,20 @@ Or if you've installed the package in a specific directory or are developing on 
 cd path/to/pacman
 npx @modelcontextprotocol/inspector uv run mcp-server-pacman
 ```
+
+## Release Process
+
+The project uses GitHub Actions for automated releases:
+
+1. Update the version in `pyproject.toml`
+2. Create a new tag with `git tag vX.Y.Z` (e.g., `git tag v0.1.0`)
+3. Push the tag with `git push --tags`
+
+This will automatically:
+- Verify the version in `pyproject.toml` matches the tag
+- Run tests and lint checks
+- Build and publish to PyPI
+- Build and publish to Docker Hub as `oborchers/mcp-server-pacman:latest` and `oborchers/mcp-server-pacman:X.Y.Z`
 
 ## Contributing
 
