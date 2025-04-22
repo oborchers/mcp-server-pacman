@@ -10,6 +10,17 @@
         "weather.py"
       ],
       "env": {}
+    },
+    "pacman": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/Users/oliverborchers/Desktop/Code.nosync/mcp-servers/pacman/src/mcp_server_pacman",
+        "run",
+        "__main__.py"
+      ],
+      "env": {}
     }
   }
 }
