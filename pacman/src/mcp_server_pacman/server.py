@@ -1,7 +1,10 @@
 from typing import Annotated, Dict, List, Optional, Literal
 import json
 import httpx
+import asyncio
 from html.parser import HTMLParser
+from cachetools import TTLCache
+from functools import wraps
 
 from mcp.shared.exceptions import McpError
 from mcp.server import Server
@@ -22,6 +25,49 @@ from pydantic import BaseModel, Field
 DEFAULT_USER_AGENT = (
     "ModelContextProtocol/1.0 Pacman (+https://github.com/modelcontextprotocol/servers)"
 )
+
+# HTTP request cache (maxsize=500, ttl=1 hour)
+_http_cache = TTLCache(maxsize=500, ttl=3600)
+_cache_lock = asyncio.Lock()
+
+# Flag to disable caching in tests
+ENABLE_CACHE = True
+
+
+def async_cached(cache):
+    """Decorator to cache results of async functions.
+
+    Since cachetools doesn't natively support async functions, we need
+    a custom decorator that handles the async/await pattern.
+    """
+
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            # Check if caching should be bypassed
+            bypass_cache = kwargs.pop("_bypass_cache", False)
+            if bypass_cache or not ENABLE_CACHE:
+                return await func(*args, **kwargs)
+
+            # Create a cache key from the function name and arguments
+            key = str(args) + str(kwargs)
+
+            # Check if the result is already in the cache
+            if key in cache:
+                return cache[key]
+
+            # Call the original function
+            result = await func(*args, **kwargs)
+
+            # Update the cache with the result (with lock to avoid race conditions)
+            async with _cache_lock:
+                cache[key] = result
+
+            return result
+
+        return wrapper
+
+    return decorator
 
 
 class PackageSearch(BaseModel):
@@ -82,6 +128,7 @@ class PyPISimpleParser(HTMLParser):
             self._current_tag = None
 
 
+@async_cached(_http_cache)
 async def search_pypi(query: str, limit: int) -> List[Dict]:
     """Search PyPI for packages matching the query using the simple index."""
     async with httpx.AsyncClient() as client:
@@ -147,6 +194,7 @@ async def search_pypi(query: str, limit: int) -> List[Dict]:
             )
 
 
+@async_cached(_http_cache)
 async def get_pypi_info(name: str, version: Optional[str] = None) -> Dict:
     """Get information about a package from PyPI."""
     async with httpx.AsyncClient() as client:
@@ -189,6 +237,7 @@ async def get_pypi_info(name: str, version: Optional[str] = None) -> Dict:
             )
 
 
+@async_cached(_http_cache)
 async def search_npm(query: str, limit: int) -> List[Dict]:
     """Search npm for packages matching the query."""
     async with httpx.AsyncClient() as client:
@@ -232,6 +281,7 @@ async def search_npm(query: str, limit: int) -> List[Dict]:
             )
 
 
+@async_cached(_http_cache)
 async def get_npm_info(name: str, version: Optional[str] = None) -> Dict:
     """Get information about a package from npm."""
     async with httpx.AsyncClient() as client:
@@ -291,6 +341,7 @@ async def get_npm_info(name: str, version: Optional[str] = None) -> Dict:
             )
 
 
+@async_cached(_http_cache)
 async def search_crates(query: str, limit: int) -> List[Dict]:
     """Search crates.io for packages matching the query."""
     async with httpx.AsyncClient() as client:
@@ -332,6 +383,7 @@ async def search_crates(query: str, limit: int) -> List[Dict]:
             )
 
 
+@async_cached(_http_cache)
 async def get_crates_info(name: str, version: Optional[str] = None) -> Dict:
     """Get information about a package from crates.io."""
     async with httpx.AsyncClient() as client:

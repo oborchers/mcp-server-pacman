@@ -25,6 +25,11 @@ from src.mcp_server_pacman.server import (
     get_crates_info,
 )
 
+# Make sure caching is enabled for integration tests
+import src.mcp_server_pacman.server
+
+src.mcp_server_pacman.server.ENABLE_CACHE = True
+
 
 # Helper to run async tests
 def async_test(coroutine):

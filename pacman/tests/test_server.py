@@ -25,6 +25,11 @@ from mcp.types import (
     TextContent,
 )
 
+# Disable caching for tests
+import src.mcp_server_pacman.server
+
+src.mcp_server_pacman.server.ENABLE_CACHE = False
+
 
 # Helper to run async tests properly
 def async_test(coroutine):
