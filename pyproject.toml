@@ -23,7 +23,7 @@ dependencies = [
 ]
 
 [project.scripts]
-mcp-server-pacman = "src.mcp_server_pacman:main"
+mcp-server-pacman = "mcp_server_pacman.__main__:main"
 
 [build-system]
 requires = ["hatchling"]

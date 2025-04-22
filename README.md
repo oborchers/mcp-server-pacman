@@ -67,7 +67,7 @@ pip install mcp-server-pacman
 After installation, you can run it as a script using:
 
 ```
-python -m src
+python -m mcp_server_pacman
 ```
 
 ## Configuration
@@ -109,7 +109,7 @@ Add to your Claude settings:
 "mcpServers": {
   "pacman": {
     "command": "python",
-    "args": ["-m", "src"]
+    "args": ["-m", "mcp-server-pacman"]
   }
 }
 ```
