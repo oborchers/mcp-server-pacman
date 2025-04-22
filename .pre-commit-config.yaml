@@ -8,16 +8,9 @@ repos:
 
   - repo: local
     hooks:
-      - id: pacman-tests
+      - id: tests
         name: pacman tests
-        entry: bash -c 'cd pacman && uv run pytest -xvs tests/'
+        entry: bash -c 'uv run pytest -xvs tests/'
         language: system
         pass_filenames: false
         files: ^pacman/
-      
-      - id: docy-tests
-        name: docy tests
-        entry: bash -c 'cd docy && uv run pytest -xvs tests/'
-        language: system
-        pass_filenames: false
-        files: ^docy/
