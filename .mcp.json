@@ -1,16 +1,5 @@
 {
   "mcpServers": {
-    "weather": {
-      "type": "stdio",
-      "command": "uv",
-      "args": [
-        "--directory",
-        "/Users/oliverborchers/Desktop/Code.nosync/mcp-servers/weather/weather",
-        "run",
-        "weather.py"
-      ],
-      "env": {}
-    },
     "pacman": {
       "type": "stdio",
       "command": "uv",
