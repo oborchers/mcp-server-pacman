@@ -29,7 +29,9 @@ jobs:
           uv pip install -e ".[dev]"
 
       - name: Lint with ruff
-        run: ruff check .
+        run: |
+          ruff check --fix .
+          ruff format --check .
 
       - name: Test with pytest
-        run: pytest
+        run: uv run pytest -xvs tests/
