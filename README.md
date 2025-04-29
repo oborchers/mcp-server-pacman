@@ -4,6 +4,10 @@
 
 A Model Context Protocol server that provides package index querying capabilities. This server enables LLMs to search and retrieve information from package repositories like PyPI, npm, crates.io, Docker Hub, and Terraform Registry.
 
+<a href="https://glama.ai/mcp/servers/@oborchers/mcp-server-pacman">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/@oborchers/mcp-server-pacman/badge" alt="mcp-server-pacman MCP server" />
+</a>
+
 ### Available Tools
 
 - `search_package` - Search for packages in package indices
