@@ -4,7 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Build/Lint/Test Commands
 - Run tests: `uv run pytest -xvs tests/`
-- Run a single test: `uv run pytest -xvs tests/test_file.py::TestClass::test_method`
+- Run provider tests: `uv run pytest -xvs tests/providers/`
+- Run integration tests: `uv run pytest -xvs tests/integration/`
+- Run specific test file: `uv run pytest -xvs tests/providers/test_pypi.py`
+- Run a single test: `uv run pytest -xvs tests/providers/test_pypi.py::TestPyPIFunctions::test_search_pypi_success`
 - Check formatting: `uv run ruff format --check .`
 - Format code: `uv run ruff format .`
 - Lint code: `uv run ruff check .`
@@ -22,3 +25,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Use descriptive error messages with context
 - Use f-strings for string formatting
 - Test code with unittest framework and async helpers
+
+## Project Structure
+- Place models in `src/mcp_server_pacman/models/`
+- Provider API functions go in `src/mcp_server_pacman/providers/`
+- Utility functions go in `src/mcp_server_pacman/utils/`
+- Tests mirror the source directory structure
+- Integration tests go in `tests/integration/`
+- Keep HTTP client code in provider modules

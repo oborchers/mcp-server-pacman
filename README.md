@@ -2,7 +2,7 @@
 
 # Pacman MCP Server
 
-A Model Context Protocol server that provides package index querying capabilities. This server enables LLMs to search and retrieve information from package repositories like PyPI, npm, and crates.io.
+A Model Context Protocol server that provides package index querying capabilities. This server enables LLMs to search and retrieve information from package repositories like PyPI, npm, crates.io, and Docker Hub.
 
 ### Available Tools
 
@@ -15,6 +15,14 @@ A Model Context Protocol server that provides package index querying capabilitie
     - `index` (string, required): Package index to query ("pypi", "npm", "crates")
     - `name` (string, required): Package name
     - `version` (string, optional): Specific version to get info for (default: latest)
+
+- `search_docker_image` - Search for Docker images in Docker Hub
+    - `query` (string, required): Image name or search query
+    - `limit` (integer, optional): Maximum number of results to return (default: 5, max: 50)
+
+- `docker_image_info` - Get detailed information about a specific Docker image
+    - `name` (string, required): Image name (e.g., user/repo or library/repo)
+    - `tag` (string, optional): Specific image tag (default: latest)
 
 ### Prompts
 
@@ -50,6 +58,17 @@ A Model Context Protocol server that provides package index querying capabilitie
   - Arguments:
     - `name` (string, required): Package name
     - `version` (string, optional): Specific version
+    
+- **search_docker**
+  - Search for Docker images on Docker Hub
+  - Arguments:
+    - `query` (string, required): Image name or search query
+
+- **docker_info**
+  - Get information about a specific Docker image
+  - Arguments:
+    - `name` (string, required): Image name (e.g., user/repo)
+    - `tag` (string, optional): Specific tag
 
 ## Installation
 
@@ -177,7 +196,42 @@ ModelContextProtocol/1.0 Pacman (+https://github.com/modelcontextprotocol/server
 
 This can be customized by adding the argument `--user-agent=YourUserAgent` to the `args` list in the configuration.
 
-## Debugging
+## Development
+
+### Running Tests
+
+- Run all tests:
+  ```
+  uv run pytest -xvs
+  ```
+
+- Run specific test categories:
+  ```
+  # Run all provider tests
+  uv run pytest -xvs tests/providers/
+
+  # Run integration tests for a specific provider
+  uv run pytest -xvs tests/integration/test_pypi_integration.py
+  
+  # Run specific test class
+  uv run pytest -xvs tests/providers/test_npm.py::TestNPMFunctions
+  
+  # Run a specific test method
+  uv run pytest -xvs tests/providers/test_pypi.py::TestPyPIFunctions::test_search_pypi_success
+  ```
+
+- Check code style:
+  ```
+  uv run ruff check .
+  uv run ruff format --check .
+  ```
+
+- Format code:
+  ```
+  uv run ruff format .
+  ```
+
+### Debugging
 
 You can use the MCP inspector to debug the server. For uvx installations:
 
@@ -205,6 +259,37 @@ This will automatically:
 - Run tests and lint checks
 - Build and publish to PyPI
 - Build and publish to Docker Hub as `oborchers/mcp-server-pacman:latest` and `oborchers/mcp-server-pacman:X.Y.Z`
+
+## Project Structure
+
+The codebase is organized into the following structure:
+
+```
+src/mcp_server_pacman/
+├── models/             # Data models/schemas
+├── providers/          # Package registry API clients
+│   ├── pypi.py         # PyPI API functions
+│   ├── npm.py          # npm API functions
+│   ├── crates.py       # crates.io API functions
+│   └── dockerhub.py    # Docker Hub API functions
+├── utils/              # Utilities and helpers
+│   ├── cache.py        # Caching functionality
+│   ├── constants.py    # Shared constants
+│   └── parsers.py      # HTML parsing utilities
+├── __init__.py         # Package initialization
+├── __main__.py         # Entry point
+└── server.py           # MCP server implementation
+```
+
+Tests follow a similar structure:
+
+```
+tests/
+├── integration/        # Integration tests (real API calls)
+├── models/             # Model validation tests
+├── providers/          # Provider function tests
+└── utils/              # Test utilities
+```
 
 ## Contributing
 

@@ -1,12 +1,7 @@
-from typing import Annotated, Dict, List, Optional, Literal
+"""MCP Server implementation for Pacman package index tools."""
+
 import json
-import httpx
-import asyncio
-import time
-import traceback
-from html.parser import HTMLParser
-from cachetools import TTLCache
-from functools import wraps
+from typing import Optional
 from loguru import logger
 from mcp.shared.exceptions import McpError
 from mcp.server import Server
@@ -20,507 +15,31 @@ from mcp.types import (
     TextContent,
     Tool,
     INVALID_PARAMS,
-    INTERNAL_ERROR,
 )
-from pydantic import BaseModel, Field
+
+# Import models
+from .models import PackageSearch, PackageInfo, DockerImageSearch, DockerImageInfo
+
+# Import providers
+from .providers import (
+    search_pypi,
+    get_pypi_info,
+    search_npm,
+    get_npm_info,
+    search_crates,
+    get_crates_info,
+    search_docker_hub,
+    get_docker_hub_tags,
+    get_docker_hub_tag_info,
+)
+
+# Import constants
 
 # Remove default handler to allow configuration from __main__.py
 logger.remove()
 
-# Logger is configured in __main__.py
 
-# Server metadata
-SERVER_NAME = "Pacman"  # Changed to match test expectations
-SERVER_VERSION = ""  # Empty since tests don't expect a version
-DEFAULT_USER_AGENT = f"ModelContextProtocol/1.0 {SERVER_NAME} (+https://github.com/modelcontextprotocol/servers)"
-
-# HTTP request cache (maxsize=500, ttl=1 hour)
-_http_cache = TTLCache(maxsize=500, ttl=3600)
-_cache_lock = asyncio.Lock()
-_cache_stats = {"hits": 0, "misses": 0, "bypasses": 0, "total_calls": 0}
-
-# Flag to disable caching in tests
-ENABLE_CACHE = True
-
-
-def async_cached(cache):
-    """Decorator to cache results of async functions.
-
-    Since cachetools doesn't natively support async functions, we need
-    a custom decorator that handles the async/await pattern.
-
-    Features:
-    - Tracks cache hits/misses/bypasses for better observability
-    - Thread-safe with asyncio lock for concurrent access
-    - Configurable bypass for testing
-    """
-
-    def decorator(func):
-        @wraps(func)
-        async def wrapper(*args, **kwargs):
-            start_time = time.time()
-            args_repr = (
-                f"({args[1:] if args else ''}{', ' if args and kwargs else ''}{kwargs})"
-            )
-            func_repr = f"{func.__name__}{args_repr}"
-
-            # Update total calls statistic
-            async with _cache_lock:
-                _cache_stats["total_calls"] += 1
-
-            # Check if caching should be bypassed
-            bypass_cache = kwargs.pop("_bypass_cache", False)
-            if bypass_cache or not ENABLE_CACHE:
-                logger.debug(f"Cache bypassed for {func_repr}")
-
-                # Update bypass statistic
-                async with _cache_lock:
-                    _cache_stats["bypasses"] += 1
-
-                # Execute function without caching
-                try:
-                    result = await func(*args, **kwargs)
-                    execution_time = time.time() - start_time
-                    logger.debug(
-                        f"Executed {func_repr} in {execution_time:.4f}s (cache bypassed)"
-                    )
-                    return result
-                except Exception as e:
-                    logger.error(f"Error executing {func_repr}: {str(e)}")
-                    logger.debug(f"Exception details: {traceback.format_exc()}")
-                    raise
-
-            # Create a cache key from the function name and arguments
-            key = str(args) + str(kwargs)
-
-            # Check if the result is already in the cache
-            if key in cache:
-                # Update hit statistic
-                async with _cache_lock:
-                    _cache_stats["hits"] += 1
-
-                execution_time = time.time() - start_time
-                logger.info(f"Cache HIT for {func_repr} in {execution_time:.4f}s")
-                logger.debug(f"Cache stats: {_cache_stats}")
-                return cache[key]
-
-            # Update miss statistic
-            async with _cache_lock:
-                _cache_stats["misses"] += 1
-
-            logger.info(f"Cache MISS for {func_repr}")
-
-            # Call the original function
-            try:
-                result = await func(*args, **kwargs)
-
-                # Update the cache with the result (with lock to avoid race conditions)
-                async with _cache_lock:
-                    cache[key] = result
-
-                execution_time = time.time() - start_time
-                logger.info(
-                    f"Cached result for {func_repr} (executed in {execution_time:.4f}s)"
-                )
-                logger.debug(
-                    f"Cache size: {len(cache)}/{cache.maxsize}, TTL: {cache.ttl}s"
-                )
-                return result
-
-            except Exception as e:
-                logger.error(f"Error executing {func_repr}: {str(e)}")
-                logger.debug(f"Exception details: {traceback.format_exc()}")
-                raise
-
-        return wrapper
-
-    return decorator
-
-
-class PackageSearch(BaseModel):
-    """Parameters for searching a package index."""
-
-    index: Annotated[
-        Literal["pypi", "npm", "crates"],
-        Field(description="Package index to search (pypi, npm, crates)"),
-    ]
-    query: Annotated[str, Field(description="Package name or search query")]
-    limit: Annotated[
-        int,
-        Field(
-            default=5,
-            description="Maximum number of results to return",
-            gt=0,
-            lt=50,
-        ),
-    ]
-
-
-class PackageInfo(BaseModel):
-    """Parameters for getting package information."""
-
-    index: Annotated[
-        Literal["pypi", "npm", "crates"],
-        Field(description="Package index to query (pypi, npm, crates)"),
-    ]
-    name: Annotated[str, Field(description="Package name")]
-    version: Annotated[
-        Optional[str],
-        Field(
-            default=None,
-            description="Specific version to get info for (default: latest)",
-        ),
-    ]
-
-
-class PyPISimpleParser(HTMLParser):
-    """Parser for PyPI's simple HTML index."""
-
-    def __init__(self):
-        super().__init__()
-        self.packages = []
-        self._current_tag = None
-
-    def handle_starttag(self, tag, attrs):
-        if tag == "a":
-            self._current_tag = tag
-            for attr in attrs:
-                if attr[0] == "href" and attr[1].startswith("/simple/"):
-                    # Extract package name from URLs like /simple/package-name/
-                    package_name = attr[1].split("/")[2]
-                    self.packages.append(package_name)
-
-    def handle_endtag(self, tag):
-        if tag == "a":
-            self._current_tag = None
-
-
-@async_cached(_http_cache)
-async def search_pypi(query: str, limit: int) -> List[Dict]:
-    """Search PyPI for packages matching the query using the simple index."""
-    async with httpx.AsyncClient() as client:
-        # First get the full package list from the simple index
-        response = await client.get(
-            "https://pypi.org/simple/",
-            headers={"Accept": "text/html", "User-Agent": DEFAULT_USER_AGENT},
-            follow_redirects=True,
-        )
-
-        if response.status_code != 200:
-            raise McpError(
-                ErrorData(
-                    code=INTERNAL_ERROR,
-                    message=f"Failed to search PyPI - status code {response.status_code}",
-                )
-            )
-
-        try:
-            # Parse the HTML to extract package names
-            parser = PyPISimpleParser()
-            parser.feed(response.text)
-
-            # Filter packages that match the query (case insensitive)
-            query_lower = query.lower()
-            matching_packages = [
-                pkg for pkg in parser.packages if query_lower in pkg.lower()
-            ]
-
-            # Sort by relevance (exact matches first, then startswith, then contains)
-            matching_packages.sort(
-                key=lambda pkg: (
-                    0
-                    if pkg.lower() == query_lower
-                    else 1
-                    if pkg.lower().startswith(query_lower)
-                    else 2
-                )
-            )
-
-            # Limit the results
-            matching_packages = matching_packages[:limit]
-
-            # For each match, get basic details (we'll fetch more details on demand)
-            results = []
-            for pkg_name in matching_packages:
-                # Create a result entry with the information we have
-                results.append(
-                    {
-                        "name": pkg_name,
-                        "version": "latest",  # We don't have version info from the simple index
-                        "description": f"Python package: {pkg_name}",
-                    }
-                )
-
-            return results
-        except Exception as e:
-            raise McpError(
-                ErrorData(
-                    code=INTERNAL_ERROR,
-                    message=f"Failed to parse PyPI search results: {str(e)}",
-                )
-            )
-
-
-@async_cached(_http_cache)
-async def get_pypi_info(name: str, version: Optional[str] = None) -> Dict:
-    """Get information about a package from PyPI."""
-    async with httpx.AsyncClient() as client:
-        url = f"https://pypi.org/pypi/{name}/json"
-        if version:
-            url = f"https://pypi.org/pypi/{name}/{version}/json"
-
-        response = await client.get(
-            url,
-            headers={"Accept": "application/json", "User-Agent": DEFAULT_USER_AGENT},
-            follow_redirects=True,
-        )
-
-        if response.status_code != 200:
-            raise McpError(
-                ErrorData(
-                    code=INTERNAL_ERROR,
-                    message=f"Failed to get package info from PyPI - status code {response.status_code}",
-                )
-            )
-
-        try:
-            data = response.json()
-            result = {
-                "name": data["info"]["name"],
-                "version": data["info"]["version"],
-                "description": data["info"]["summary"],
-                "author": data["info"]["author"],
-                "homepage": data["info"]["home_page"],
-                "license": data["info"]["license"],
-                "releases": list(data["releases"].keys()),
-            }
-            return result
-        except Exception as e:
-            raise McpError(
-                ErrorData(
-                    code=INTERNAL_ERROR,
-                    message=f"Failed to parse PyPI package info: {str(e)}",
-                )
-            )
-
-
-@async_cached(_http_cache)
-async def search_npm(query: str, limit: int) -> List[Dict]:
-    """Search npm for packages matching the query."""
-    async with httpx.AsyncClient() as client:
-        response = await client.get(
-            "https://registry.npmjs.org/-/v1/search",
-            params={"text": query, "size": limit},
-            headers={"Accept": "application/json", "User-Agent": DEFAULT_USER_AGENT},
-            follow_redirects=True,
-        )
-
-        if response.status_code != 200:
-            raise McpError(
-                ErrorData(
-                    code=INTERNAL_ERROR,
-                    message=f"Failed to search npm - status code {response.status_code}",
-                )
-            )
-
-        try:
-            data = response.json()
-            results = [
-                {
-                    "name": package["package"]["name"],
-                    "version": package["package"]["version"],
-                    "description": package["package"].get("description", ""),
-                    "publisher": package["package"]
-                    .get("publisher", {})
-                    .get("username", ""),
-                    "date": package["package"].get("date", ""),
-                    "links": package["package"].get("links", {}),
-                }
-                for package in data.get("objects", [])[:limit]
-            ]
-            return results
-        except Exception as e:
-            raise McpError(
-                ErrorData(
-                    code=INTERNAL_ERROR,
-                    message=f"Failed to parse npm search results: {str(e)}",
-                )
-            )
-
-
-@async_cached(_http_cache)
-async def get_npm_info(name: str, version: Optional[str] = None) -> Dict:
-    """Get information about a package from npm."""
-    async with httpx.AsyncClient() as client:
-        url = f"https://registry.npmjs.org/{name}"
-        if version:
-            url = f"https://registry.npmjs.org/{name}/{version}"
-
-        response = await client.get(
-            url,
-            headers={"Accept": "application/json", "User-Agent": DEFAULT_USER_AGENT},
-            follow_redirects=True,
-        )
-
-        if response.status_code != 200:
-            raise McpError(
-                ErrorData(
-                    code=INTERNAL_ERROR,
-                    message=f"Failed to get package info from npm - status code {response.status_code}",
-                )
-            )
-
-        try:
-            data = response.json()
-
-            # For specific version request
-            if version:
-                return {
-                    "name": data.get("name", name),
-                    "version": data.get("version", version),
-                    "description": data.get("description", ""),
-                    "author": data.get("author", ""),
-                    "homepage": data.get("homepage", ""),
-                    "license": data.get("license", ""),
-                    "dependencies": data.get("dependencies", {}),
-                }
-
-            # For latest/all versions
-            latest_version = data.get("dist-tags", {}).get("latest", "")
-            latest_info = data.get("versions", {}).get(latest_version, {})
-
-            return {
-                "name": data.get("name", name),
-                "version": latest_version,
-                "description": latest_info.get("description", ""),
-                "author": latest_info.get("author", ""),
-                "homepage": latest_info.get("homepage", ""),
-                "license": latest_info.get("license", ""),
-                "dependencies": latest_info.get("dependencies", {}),
-                "versions": list(data.get("versions", {}).keys()),
-            }
-        except Exception as e:
-            raise McpError(
-                ErrorData(
-                    code=INTERNAL_ERROR,
-                    message=f"Failed to parse npm package info: {str(e)}",
-                )
-            )
-
-
-@async_cached(_http_cache)
-async def search_crates(query: str, limit: int) -> List[Dict]:
-    """Search crates.io for packages matching the query."""
-    async with httpx.AsyncClient() as client:
-        response = await client.get(
-            "https://crates.io/api/v1/crates",
-            params={"q": query, "per_page": limit},
-            headers={"Accept": "application/json", "User-Agent": DEFAULT_USER_AGENT},
-            follow_redirects=True,
-        )
-
-        if response.status_code != 200:
-            raise McpError(
-                ErrorData(
-                    code=INTERNAL_ERROR,
-                    message=f"Failed to search crates.io - status code {response.status_code}",
-                )
-            )
-
-        try:
-            data = response.json()
-            results = [
-                {
-                    "name": crate["name"],
-                    "version": crate["max_version"],
-                    "description": crate.get("description", ""),
-                    "downloads": crate.get("downloads", 0),
-                    "created_at": crate.get("created_at", ""),
-                    "updated_at": crate.get("updated_at", ""),
-                }
-                for crate in data.get("crates", [])[:limit]
-            ]
-            return results
-        except Exception as e:
-            raise McpError(
-                ErrorData(
-                    code=INTERNAL_ERROR,
-                    message=f"Failed to parse crates.io search results: {str(e)}",
-                )
-            )
-
-
-@async_cached(_http_cache)
-async def get_crates_info(name: str, version: Optional[str] = None) -> Dict:
-    """Get information about a package from crates.io."""
-    async with httpx.AsyncClient() as client:
-        # First get the crate info
-        url = f"https://crates.io/api/v1/crates/{name}"
-        response = await client.get(
-            url,
-            headers={"Accept": "application/json", "User-Agent": DEFAULT_USER_AGENT},
-            follow_redirects=True,
-        )
-
-        if response.status_code != 200:
-            raise McpError(
-                ErrorData(
-                    code=INTERNAL_ERROR,
-                    message=f"Failed to get package info from crates.io - status code {response.status_code}",
-                )
-            )
-
-        try:
-            data = response.json()
-            crate = data["crate"]
-
-            # If a specific version was requested, get that version's details
-            version_data = {}
-            if version:
-                version_url = f"https://crates.io/api/v1/crates/{name}/{version}"
-                version_response = await client.get(
-                    version_url,
-                    headers={
-                        "Accept": "application/json",
-                        "User-Agent": DEFAULT_USER_AGENT,
-                    },
-                    follow_redirects=True,
-                )
-
-                if version_response.status_code == 200:
-                    version_data = version_response.json().get("version", {})
-
-            # If no specific version, use the latest
-            if not version_data and data.get("versions"):
-                version = data["versions"][0]["num"]  # Latest version
-                version_data = data["versions"][0]
-
-            result = {
-                "name": crate["name"],
-                "version": version or crate.get("max_version", ""),
-                "description": crate.get("description", ""),
-                "homepage": crate.get("homepage", ""),
-                "documentation": crate.get("documentation", ""),
-                "repository": crate.get("repository", ""),
-                "downloads": crate.get("downloads", 0),
-                "recent_downloads": crate.get("recent_downloads", 0),
-                "categories": crate.get("categories", []),
-                "keywords": crate.get("keywords", []),
-                "versions": [v["num"] for v in data.get("versions", [])],
-                "yanked": version_data.get("yanked", False) if version_data else False,
-                "license": version_data.get("license", "") if version_data else "",
-            }
-            return result
-        except Exception as e:
-            raise McpError(
-                ErrorData(
-                    code=INTERNAL_ERROR,
-                    message=f"Failed to parse crates.io package info: {str(e)}",
-                )
-            )
-
-
-async def serve(custom_user_agent: str | None = None) -> None:
+async def serve(custom_user_agent: Optional[str] = None) -> None:
     """Run the pacman MCP server.
 
     Args:
@@ -548,6 +67,16 @@ async def serve(custom_user_agent: str | None = None) -> None:
                 name="package_info",
                 description="Get detailed information about a specific package",
                 inputSchema=PackageInfo.model_json_schema(),
+            ),
+            Tool(
+                name="search_docker_image",
+                description="Search for Docker images in Docker Hub",
+                inputSchema=DockerImageSearch.model_json_schema(),
+            ),
+            Tool(
+                name="docker_image_info",
+                description="Get detailed information about a specific Docker image",
+                inputSchema=DockerImageInfo.model_json_schema(),
             ),
         ]
 
@@ -621,6 +150,29 @@ async def serve(custom_user_agent: str | None = None) -> None:
                     PromptArgument(
                         name="version", description="Specific version (optional)"
                     ),
+                ],
+            ),
+            Prompt(
+                name="search_docker",
+                description="Search for Docker images on Docker Hub",
+                arguments=[
+                    PromptArgument(
+                        name="query",
+                        description="Image name or search query",
+                        required=True,
+                    )
+                ],
+            ),
+            Prompt(
+                name="docker_info",
+                description="Get information about a specific Docker image",
+                arguments=[
+                    PromptArgument(
+                        name="name",
+                        description="Image name (e.g., user/repo)",
+                        required=True,
+                    ),
+                    PromptArgument(name="tag", description="Specific tag (optional)"),
                 ],
             ),
         ]
@@ -705,11 +257,58 @@ async def serve(custom_user_agent: str | None = None) -> None:
                 )
             ]
 
+        elif name == "search_docker_image":
+            try:
+                args = DockerImageSearch(**arguments)
+                logger.debug(f"Validated docker image search args: {args}")
+            except ValueError as e:
+                logger.error(f"Invalid docker image search parameters: {str(e)}")
+                raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e)))
+
+            logger.info(f"Searching Docker Hub for '{args.query}' (limit={args.limit})")
+            results = await search_docker_hub(args.query, args.limit)
+
+            logger.info(
+                f"Found {len(results)} results for '{args.query}' on Docker Hub"
+            )
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Search results for '{args.query}' on Docker Hub:\n{json.dumps(results, indent=2)}",
+                )
+            ]
+
+        elif name == "docker_image_info":
+            try:
+                args = DockerImageInfo(**arguments)
+                logger.debug(f"Validated docker image info args: {args}")
+            except ValueError as e:
+                logger.error(f"Invalid docker image info parameters: {str(e)}")
+                raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e)))
+
+            logger.info(
+                f"Getting Docker image info for {args.name}"
+                + (f" (tag={args.tag})" if args.tag else "")
+            )
+
+            if args.tag:
+                info = await get_docker_hub_tag_info(args.name, args.tag)
+            else:
+                info = await get_docker_hub_tags(args.name)
+
+            logger.info(f"Successfully retrieved Docker image info for {args.name}")
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Docker image information for {args.name}:\n{json.dumps(info, indent=2)}",
+                )
+            ]
+
         logger.error(f"Unknown tool: {name}")
         raise McpError(ErrorData(code=INVALID_PARAMS, message=f"Unknown tool: {name}"))
 
     @server.get_prompt()
-    async def get_prompt(name: str, arguments: dict | None) -> GetPromptResult:
+    async def get_prompt(name: str, arguments: Optional[dict]) -> GetPromptResult:
         logger.info(f"Prompt request: {name} with arguments: {arguments}")
 
         if name == "search_pypi":
@@ -912,6 +511,74 @@ async def serve(custom_user_agent: str | None = None) -> None:
             except McpError as e:
                 return GetPromptResult(
                     description=f"Failed to get information for {package_name}",
+                    messages=[
+                        PromptMessage(
+                            role="user", content=TextContent(type="text", text=str(e))
+                        )
+                    ],
+                )
+
+        elif name == "search_docker":
+            if not arguments or "query" not in arguments:
+                raise McpError(
+                    ErrorData(code=INVALID_PARAMS, message="Search query is required")
+                )
+
+            query = arguments["query"]
+            try:
+                results = await search_docker_hub(query, 5)
+                return GetPromptResult(
+                    description=f"Search results for '{query}' on Docker Hub",
+                    messages=[
+                        PromptMessage(
+                            role="user",
+                            content=TextContent(
+                                type="text",
+                                text=f"Results for '{query}':\n{json.dumps(results, indent=2)}",
+                            ),
+                        )
+                    ],
+                )
+            except McpError as e:
+                return GetPromptResult(
+                    description=f"Failed to search for '{query}'",
+                    messages=[
+                        PromptMessage(
+                            role="user", content=TextContent(type="text", text=str(e))
+                        )
+                    ],
+                )
+
+        elif name == "docker_info":
+            if not arguments or "name" not in arguments:
+                raise McpError(
+                    ErrorData(code=INVALID_PARAMS, message="Image name is required")
+                )
+
+            image_name = arguments["name"]
+            tag = arguments.get("tag")
+
+            try:
+                if tag:
+                    info = await get_docker_hub_tag_info(image_name, tag)
+                else:
+                    info = await get_docker_hub_tags(image_name)
+
+                return GetPromptResult(
+                    description=f"Information for {image_name} on Docker Hub",
+                    messages=[
+                        PromptMessage(
+                            role="user",
+                            content=TextContent(
+                                type="text",
+                                text=f"Image information:\n{json.dumps(info, indent=2)}",
+                            ),
+                        )
+                    ],
+                )
+            except McpError as e:
+                return GetPromptResult(
+                    description=f"Failed to get information for {image_name}",
                     messages=[
                         PromptMessage(
                             role="user", content=TextContent(type="text", text=str(e))
