@@ -2,9 +2,6 @@
 
 import unittest
 from unittest.mock import patch, MagicMock
-import json
-import httpx
-import asyncio
 from mcp.shared.exceptions import McpError
 
 from src.mcp_server_pacman.providers.terraform import (
@@ -177,7 +174,7 @@ class TestTerraformFunctions(unittest.IsolatedAsyncioTestCase):
             if "/versions" in url:
                 return versions_response
             return module_response
-            
+
         mock_get.side_effect = side_effect
 
         # Call the function
@@ -188,11 +185,11 @@ class TestTerraformFunctions(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["namespace"], "hashicorp")
         self.assertEqual(result["module"], "consul")
         self.assertEqual(result["provider"], "aws")
-        
+
         # Check that required fields exist
         self.assertIn("version", result)
         self.assertIn("source", result)
-        
+
         # Versions field might be included depending on implementation details
         if "versions" in result:
             self.assertIsInstance(result["versions"], list)

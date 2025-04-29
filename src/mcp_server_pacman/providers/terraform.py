@@ -1,6 +1,6 @@
 """Terraform Registry provider."""
 
-from typing import Dict, List, Optional
+from typing import Dict, List
 import httpx
 from mcp.shared.exceptions import McpError
 from mcp.types import ErrorData, INTERNAL_ERROR

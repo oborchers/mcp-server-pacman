@@ -1,7 +1,6 @@
 """Integration tests for the Terraform Registry provider."""
 
 import unittest
-import asyncio
 
 from src.mcp_server_pacman.providers.terraform import (
     search_terraform_modules,
@@ -60,7 +59,7 @@ class TestTerraformIntegration(unittest.IsolatedAsyncioTestCase):
 
             # Print the info for debugging
             print(f"Module info: {info}")
-            
+
             # Verify the structure of the returned info
             self.assertIn("name", info)
             self.assertIn("namespace", info)
@@ -96,7 +95,7 @@ class TestTerraformIntegration(unittest.IsolatedAsyncioTestCase):
 
             # Print the whole version_info for debugging
             print(f"Version info: {version_info}")
-            
+
             # Version should be a string
             version = version_info["version"]
             self.assertIsInstance(version, str)
