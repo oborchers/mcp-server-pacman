@@ -554,9 +554,10 @@ async def get_crates_info(name: str, version: Optional[str] = None) -> Dict:
 async def search_docker_hub(query: str, limit: int) -> List[Dict]:
     """Search Docker Hub for images matching the query."""
     async with httpx.AsyncClient() as client:
+        # Use the v2 API for more reliable results
         response = await client.get(
-            "https://hub.docker.com/api/content/v1/products/search",
-            params={"q": query, "page_size": limit, "type": "image"},
+            "https://hub.docker.com/v2/search/repositories",
+            params={"query": query, "page_size": limit},
             headers={"Accept": "application/json", "User-Agent": DEFAULT_USER_AGENT},
             follow_redirects=True,
         )
@@ -573,14 +574,18 @@ async def search_docker_hub(query: str, limit: int) -> List[Dict]:
             data = response.json()
             results = [
                 {
-                    "name": image.get("name", ""),
-                    "description": image.get("short_description", ""),
+                    "name": image.get(
+                        "repo_name", ""
+                    ),  # Using repo_name as the name field
+                    "description": image.get("description", "")
+                    or image.get("short_description", ""),
                     "star_count": image.get("star_count", 0),
                     "pull_count": image.get("pull_count", 0),
                     "is_official": image.get("is_official", False),
-                    "updated_at": image.get("updated_at", ""),
+                    "updated_at": image.get("last_updated", "")
+                    or image.get("updated_at", ""),
                 }
-                for image in data.get("summaries", [])[:limit]
+                for image in data.get("results", [])[:limit]
             ]
             return results
         except Exception as e:

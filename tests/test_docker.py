@@ -67,22 +67,22 @@ class TestDockerHubFunctions(unittest.TestCase):
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
-            "summaries": [
+            "results": [
                 {
-                    "name": "nginx",
-                    "short_description": "Official NGINX image",
+                    "repo_name": "nginx",
+                    "description": "Official NGINX image",
                     "star_count": 15000,
                     "pull_count": 10000000,
                     "is_official": True,
-                    "updated_at": "2022-10-01T00:00:00Z",
+                    "last_updated": "2022-10-01T00:00:00Z",
                 },
                 {
-                    "name": "nginxinc/nginx-unprivileged",
-                    "short_description": "Unprivileged NGINX image",
+                    "repo_name": "nginxinc/nginx-unprivileged",
+                    "description": "Unprivileged NGINX image",
                     "star_count": 100,
                     "pull_count": 10000,
                     "is_official": False,
-                    "updated_at": "2022-09-15T00:00:00Z",
+                    "last_updated": "2022-09-15T00:00:00Z",
                 },
             ]
         }
@@ -96,8 +96,8 @@ class TestDockerHubFunctions(unittest.TestCase):
 
         # Verify calls and results
         mock_client_instance.get.assert_called_once_with(
-            "https://hub.docker.com/api/content/v1/products/search",
-            params={"q": "nginx", "page_size": 2, "type": "image"},
+            "https://hub.docker.com/v2/search/repositories",
+            params={"query": "nginx", "page_size": 2},
             headers={
                 "Accept": "application/json",
                 "User-Agent": "ModelContextProtocol/1.0 Pacman (+https://github.com/modelcontextprotocol/servers)",
@@ -124,8 +124,16 @@ class TestDockerHubFunctions(unittest.TestCase):
         with self.assertRaises(McpError) as context:
             await search_docker_hub("nginx", 2)
 
-        # Verify API call was made
-        mock_client_instance.get.assert_called_once()
+        # Verify API call was made with the updated URL
+        mock_client_instance.get.assert_called_once_with(
+            "https://hub.docker.com/v2/search/repositories",
+            params={"query": "nginx", "page_size": 2},
+            headers={
+                "Accept": "application/json",
+                "User-Agent": "ModelContextProtocol/1.0 Pacman (+https://github.com/modelcontextprotocol/servers)",
+            },
+            follow_redirects=True,
+        )
         self.assertEqual(context.exception.error.code, INTERNAL_ERROR)
         self.assertIn("Failed to search Docker Hub", context.exception.error.message)
 
