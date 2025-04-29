@@ -2,7 +2,7 @@
 
 # Pacman MCP Server
 
-A Model Context Protocol server that provides package index querying capabilities. This server enables LLMs to search and retrieve information from package repositories like PyPI, npm, crates.io, and Docker Hub.
+A Model Context Protocol server that provides package index querying capabilities. This server enables LLMs to search and retrieve information from package repositories like PyPI, npm, crates.io, Docker Hub, and Terraform Registry.
 
 ### Available Tools
 
