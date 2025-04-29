@@ -8,8 +8,8 @@ class PackageSearch(BaseModel):
     """Parameters for searching a package index."""
 
     index: Annotated[
-        Literal["pypi", "npm", "crates"],
-        Field(description="Package index to search (pypi, npm, crates)"),
+        Literal["pypi", "npm", "crates", "terraform"],
+        Field(description="Package index to search (pypi, npm, crates, terraform)"),
     ]
     query: Annotated[str, Field(description="Package name or search query")]
     limit: Annotated[
@@ -27,8 +27,8 @@ class PackageInfo(BaseModel):
     """Parameters for getting package information."""
 
     index: Annotated[
-        Literal["pypi", "npm", "crates"],
-        Field(description="Package index to query (pypi, npm, crates)"),
+        Literal["pypi", "npm", "crates", "terraform"],
+        Field(description="Package index to query (pypi, npm, crates, terraform)"),
     ]
     name: Annotated[str, Field(description="Package name")]
     version: Annotated[
@@ -67,4 +67,12 @@ class DockerImageInfo(BaseModel):
             default=None,
             description="Specific image tag (default: latest)",
         ),
+    ]
+
+
+class TerraformModuleLatestVersion(BaseModel):
+    """Parameters for getting the latest version of a Terraform module."""
+
+    name: Annotated[
+        str, Field(description="Module name (format: namespace/name/provider)")
     ]

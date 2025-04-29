@@ -18,7 +18,13 @@ from mcp.types import (
 )
 
 # Import models
-from .models import PackageSearch, PackageInfo, DockerImageSearch, DockerImageInfo
+from .models import (
+    PackageSearch,
+    PackageInfo,
+    DockerImageSearch,
+    DockerImageInfo,
+    TerraformModuleLatestVersion,
+)
 
 # Import providers
 from .providers import (
@@ -31,6 +37,9 @@ from .providers import (
     search_docker_hub,
     get_docker_hub_tags,
     get_docker_hub_tag_info,
+    search_terraform_modules,
+    get_terraform_module_info,
+    get_latest_terraform_module_version,
 )
 
 # Import constants
@@ -60,7 +69,7 @@ async def serve(custom_user_agent: Optional[str] = None) -> None:
         return [
             Tool(
                 name="search_package",
-                description="Search for packages in package indices (PyPI, npm, crates.io)",
+                description="Search for packages in package indices (PyPI, npm, crates.io, Terraform Registry)",
                 inputSchema=PackageSearch.model_json_schema(),
             ),
             Tool(
@@ -77,6 +86,11 @@ async def serve(custom_user_agent: Optional[str] = None) -> None:
                 name="docker_image_info",
                 description="Get detailed information about a specific Docker image",
                 inputSchema=DockerImageInfo.model_json_schema(),
+            ),
+            Tool(
+                name="terraform_module_latest_version",
+                description="Get the latest version of a Terraform module",
+                inputSchema=TerraformModuleLatestVersion.model_json_schema(),
             ),
         ]
 
@@ -175,6 +189,39 @@ async def serve(custom_user_agent: Optional[str] = None) -> None:
                     PromptArgument(name="tag", description="Specific tag (optional)"),
                 ],
             ),
+            Prompt(
+                name="search_terraform",
+                description="Search for Terraform modules in the Terraform Registry",
+                arguments=[
+                    PromptArgument(
+                        name="query",
+                        description="Module name or search query",
+                        required=True,
+                    )
+                ],
+            ),
+            Prompt(
+                name="terraform_info",
+                description="Get information about a specific Terraform module",
+                arguments=[
+                    PromptArgument(
+                        name="name",
+                        description="Module name (format: namespace/name/provider)",
+                        required=True,
+                    ),
+                ],
+            ),
+            Prompt(
+                name="terraform_latest_version",
+                description="Get the latest version of a specific Terraform module",
+                arguments=[
+                    PromptArgument(
+                        name="name",
+                        description="Module name (format: namespace/name/provider)",
+                        required=True,
+                    ),
+                ],
+            ),
         ]
 
     @server.call_tool()
@@ -200,6 +247,11 @@ async def serve(custom_user_agent: Optional[str] = None) -> None:
                     f"Searching crates.io for '{args.query}' (limit={args.limit})"
                 )
                 results = await search_crates(args.query, args.limit)
+            elif args.index == "terraform":
+                logger.info(
+                    f"Searching Terraform Registry for '{args.query}' (limit={args.limit})"
+                )
+                results = await search_terraform_modules(args.query, args.limit)
             else:
                 logger.error(f"Unsupported package index: {args.index}")
                 raise McpError(
@@ -238,6 +290,12 @@ async def serve(custom_user_agent: Optional[str] = None) -> None:
                 info = await get_npm_info(args.name, args.version)
             elif args.index == "crates":
                 info = await get_crates_info(args.name, args.version)
+            elif args.index == "terraform":
+                if args.version:
+                    logger.info(
+                        "Version-specific info for Terraform modules is not supported yet"
+                    )
+                info = await get_terraform_module_info(args.name)
             else:
                 logger.error(f"Unsupported package index: {args.index}")
                 raise McpError(
@@ -303,6 +361,35 @@ async def serve(custom_user_agent: Optional[str] = None) -> None:
                     text=f"Docker image information for {args.name}:\n{json.dumps(info, indent=2)}",
                 )
             ]
+
+        elif name == "terraform_module_latest_version":
+            try:
+                args = TerraformModuleLatestVersion(**arguments)
+                logger.debug(f"Validated terraform module latest version args: {args}")
+            except ValueError as e:
+                logger.error(
+                    f"Invalid terraform module latest version parameters: {str(e)}"
+                )
+                raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e)))
+
+            logger.info(f"Getting latest version for Terraform module {args.name}")
+
+            try:
+                info = await get_latest_terraform_module_version(args.name)
+                logger.info(
+                    f"Successfully retrieved latest version for Terraform module {args.name}"
+                )
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"Latest version for Terraform module {args.name}:\n{json.dumps(info, indent=2)}",
+                    )
+                ]
+            except McpError as e:
+                logger.error(
+                    f"Error getting latest version for Terraform module: {str(e)}"
+                )
+                raise
 
         logger.error(f"Unknown tool: {name}")
         raise McpError(ErrorData(code=INVALID_PARAMS, message=f"Unknown tool: {name}"))
@@ -579,6 +666,101 @@ async def serve(custom_user_agent: Optional[str] = None) -> None:
             except McpError as e:
                 return GetPromptResult(
                     description=f"Failed to get information for {image_name}",
+                    messages=[
+                        PromptMessage(
+                            role="user", content=TextContent(type="text", text=str(e))
+                        )
+                    ],
+                )
+
+        elif name == "search_terraform":
+            if not arguments or "query" not in arguments:
+                raise McpError(
+                    ErrorData(code=INVALID_PARAMS, message="Search query is required")
+                )
+
+            query = arguments["query"]
+            try:
+                results = await search_terraform_modules(query, 5)
+                return GetPromptResult(
+                    description=f"Search results for '{query}' on Terraform Registry",
+                    messages=[
+                        PromptMessage(
+                            role="user",
+                            content=TextContent(
+                                type="text",
+                                text=f"Results for '{query}':\n{json.dumps(results, indent=2)}",
+                            ),
+                        )
+                    ],
+                )
+            except McpError as e:
+                return GetPromptResult(
+                    description=f"Failed to search for '{query}'",
+                    messages=[
+                        PromptMessage(
+                            role="user", content=TextContent(type="text", text=str(e))
+                        )
+                    ],
+                )
+
+        elif name == "terraform_info":
+            if not arguments or "name" not in arguments:
+                raise McpError(
+                    ErrorData(code=INVALID_PARAMS, message="Module name is required")
+                )
+
+            module_name = arguments["name"]
+
+            try:
+                info = await get_terraform_module_info(module_name)
+                return GetPromptResult(
+                    description=f"Information for {module_name} on Terraform Registry",
+                    messages=[
+                        PromptMessage(
+                            role="user",
+                            content=TextContent(
+                                type="text",
+                                text=f"Module information:\n{json.dumps(info, indent=2)}",
+                            ),
+                        )
+                    ],
+                )
+            except McpError as e:
+                return GetPromptResult(
+                    description=f"Failed to get information for {module_name}",
+                    messages=[
+                        PromptMessage(
+                            role="user", content=TextContent(type="text", text=str(e))
+                        )
+                    ],
+                )
+
+        elif name == "terraform_latest_version":
+            if not arguments or "name" not in arguments:
+                raise McpError(
+                    ErrorData(code=INVALID_PARAMS, message="Module name is required")
+                )
+
+            module_name = arguments["name"]
+
+            try:
+                info = await get_latest_terraform_module_version(module_name)
+                return GetPromptResult(
+                    description=f"Latest version for {module_name} on Terraform Registry",
+                    messages=[
+                        PromptMessage(
+                            role="user",
+                            content=TextContent(
+                                type="text",
+                                text=f"Latest version information:\n{json.dumps(info, indent=2)}",
+                            ),
+                        )
+                    ],
+                )
+            except McpError as e:
+                return GetPromptResult(
+                    description=f"Failed to get latest version for {module_name}",
                     messages=[
                         PromptMessage(
                             role="user", content=TextContent(type="text", text=str(e))

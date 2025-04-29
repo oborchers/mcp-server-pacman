@@ -5,6 +5,13 @@ from .package_models import (
     PackageInfo,
     DockerImageSearch,
     DockerImageInfo,
+    TerraformModuleLatestVersion,
 )
 
-__all__ = ["PackageSearch", "PackageInfo", "DockerImageSearch", "DockerImageInfo"]
+__all__ = [
+    "PackageSearch",
+    "PackageInfo",
+    "DockerImageSearch",
+    "DockerImageInfo",
+    "TerraformModuleLatestVersion",
+]
