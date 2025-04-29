@@ -2,7 +2,7 @@
 
 # Pacman MCP Server
 
-A Model Context Protocol server that provides package index querying capabilities. This server enables LLMs to search and retrieve information from package repositories like PyPI, npm, and crates.io.
+A Model Context Protocol server that provides package index querying capabilities. This server enables LLMs to search and retrieve information from package repositories like PyPI, npm, crates.io, and Docker Hub.
 
 ### Available Tools
 
@@ -15,6 +15,14 @@ A Model Context Protocol server that provides package index querying capabilitie
     - `index` (string, required): Package index to query ("pypi", "npm", "crates")
     - `name` (string, required): Package name
     - `version` (string, optional): Specific version to get info for (default: latest)
+
+- `search_docker_image` - Search for Docker images in Docker Hub
+    - `query` (string, required): Image name or search query
+    - `limit` (integer, optional): Maximum number of results to return (default: 5, max: 50)
+
+- `docker_image_info` - Get detailed information about a specific Docker image
+    - `name` (string, required): Image name (e.g., user/repo or library/repo)
+    - `tag` (string, optional): Specific image tag (default: latest)
 
 ### Prompts
 
@@ -50,6 +58,17 @@ A Model Context Protocol server that provides package index querying capabilitie
   - Arguments:
     - `name` (string, required): Package name
     - `version` (string, optional): Specific version
+    
+- **search_docker**
+  - Search for Docker images on Docker Hub
+  - Arguments:
+    - `query` (string, required): Image name or search query
+
+- **docker_info**
+  - Get information about a specific Docker image
+  - Arguments:
+    - `name` (string, required): Image name (e.g., user/repo)
+    - `tag` (string, optional): Specific tag
 
 ## Installation
 

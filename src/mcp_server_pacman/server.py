@@ -173,6 +173,36 @@ class PackageInfo(BaseModel):
     ]
 
 
+class DockerImageSearch(BaseModel):
+    """Parameters for searching Docker images."""
+
+    query: Annotated[str, Field(description="Image name or search query")]
+    limit: Annotated[
+        int,
+        Field(
+            default=5,
+            description="Maximum number of results to return",
+            gt=0,
+            lt=50,
+        ),
+    ]
+
+
+class DockerImageInfo(BaseModel):
+    """Parameters for getting Docker image information."""
+
+    name: Annotated[
+        str, Field(description="Image name (e.g., user/repo or library/repo)")
+    ]
+    tag: Annotated[
+        Optional[str],
+        Field(
+            default=None,
+            description="Specific image tag (default: latest)",
+        ),
+    ]
+
+
 class PyPISimpleParser(HTMLParser):
     """Parser for PyPI's simple HTML index."""
 
@@ -520,6 +550,179 @@ async def get_crates_info(name: str, version: Optional[str] = None) -> Dict:
             )
 
 
+@async_cached(_http_cache)
+async def search_docker_hub(query: str, limit: int) -> List[Dict]:
+    """Search Docker Hub for images matching the query."""
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            "https://hub.docker.com/api/content/v1/products/search",
+            params={"q": query, "page_size": limit, "type": "image"},
+            headers={"Accept": "application/json", "User-Agent": DEFAULT_USER_AGENT},
+            follow_redirects=True,
+        )
+
+        if response.status_code != 200:
+            raise McpError(
+                ErrorData(
+                    code=INTERNAL_ERROR,
+                    message=f"Failed to search Docker Hub - status code {response.status_code}",
+                )
+            )
+
+        try:
+            data = response.json()
+            results = [
+                {
+                    "name": image.get("name", ""),
+                    "description": image.get("short_description", ""),
+                    "star_count": image.get("star_count", 0),
+                    "pull_count": image.get("pull_count", 0),
+                    "is_official": image.get("is_official", False),
+                    "updated_at": image.get("updated_at", ""),
+                }
+                for image in data.get("summaries", [])[:limit]
+            ]
+            return results
+        except Exception as e:
+            raise McpError(
+                ErrorData(
+                    code=INTERNAL_ERROR,
+                    message=f"Failed to parse Docker Hub search results: {str(e)}",
+                )
+            )
+
+
+@async_cached(_http_cache)
+async def get_docker_hub_tags(name: str) -> Dict:
+    """Get information about tags for a specific Docker image."""
+    # Split the image name into namespace and repository
+    if "/" in name:
+        namespace, repository = name.split("/", 1)
+    else:
+        namespace, repository = "library", name
+
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            f"https://hub.docker.com/v2/repositories/{namespace}/{repository}/tags",
+            params={"page_size": 25, "ordering": "last_updated"},
+            headers={"Accept": "application/json", "User-Agent": DEFAULT_USER_AGENT},
+            follow_redirects=True,
+        )
+
+        if response.status_code != 200:
+            raise McpError(
+                ErrorData(
+                    code=INTERNAL_ERROR,
+                    message=f"Failed to get image tags from Docker Hub - status code {response.status_code}",
+                )
+            )
+
+        try:
+            data = response.json()
+            tags = [
+                {
+                    "name": tag.get("name", ""),
+                    "last_updated": tag.get("last_updated", ""),
+                    "digest": tag.get("digest", ""),
+                    "images": [
+                        {
+                            "architecture": img.get("architecture", ""),
+                            "os": img.get("os", ""),
+                            "size": img.get("size", 0),
+                        }
+                        for img in tag.get("images", [])
+                    ],
+                }
+                for tag in data.get("results", [])
+            ]
+
+            # Get repo information
+            repo_response = await client.get(
+                f"https://hub.docker.com/v2/repositories/{namespace}/{repository}",
+                headers={
+                    "Accept": "application/json",
+                    "User-Agent": DEFAULT_USER_AGENT,
+                },
+                follow_redirects=True,
+            )
+            repo_info = {}
+            if repo_response.status_code == 200:
+                repo_data = repo_response.json()
+                repo_info = {
+                    "description": repo_data.get("description", ""),
+                    "star_count": repo_data.get("star_count", 0),
+                    "pull_count": repo_data.get("pull_count", 0),
+                    "is_official": repo_data.get("is_official", False),
+                    "last_updated": repo_data.get("last_updated", ""),
+                }
+
+            return {
+                "name": f"{namespace}/{repository}",
+                "tags": tags,
+                "tag_count": data.get("count", 0),
+                "repository": repo_info,
+            }
+        except Exception as e:
+            raise McpError(
+                ErrorData(
+                    code=INTERNAL_ERROR,
+                    message=f"Failed to parse Docker Hub tags response: {str(e)}",
+                )
+            )
+
+
+@async_cached(_http_cache)
+async def get_docker_hub_tag_info(name: str, tag: str = "latest") -> Dict:
+    """Get information about a specific tag of a Docker image."""
+    # Split the image name into namespace and repository
+    if "/" in name:
+        namespace, repository = name.split("/", 1)
+    else:
+        namespace, repository = "library", name
+
+    async with httpx.AsyncClient() as client:
+        tag_url = f"https://hub.docker.com/v2/repositories/{namespace}/{repository}/tags/{tag}"
+        response = await client.get(
+            tag_url,
+            headers={"Accept": "application/json", "User-Agent": DEFAULT_USER_AGENT},
+            follow_redirects=True,
+        )
+
+        if response.status_code != 200:
+            raise McpError(
+                ErrorData(
+                    code=INTERNAL_ERROR,
+                    message=f"Failed to get tag info for {name}:{tag} - status code {response.status_code}",
+                )
+            )
+
+        try:
+            data = response.json()
+            result = {
+                "name": f"{namespace}/{repository}",
+                "tag": tag,
+                "last_updated": data.get("last_updated", ""),
+                "full_size": data.get("full_size", 0),
+                "digest": data.get("digest", ""),
+                "images": [
+                    {
+                        "architecture": img.get("architecture", ""),
+                        "os": img.get("os", ""),
+                        "size": img.get("size", 0),
+                    }
+                    for img in data.get("images", [])
+                ],
+            }
+            return result
+        except Exception as e:
+            raise McpError(
+                ErrorData(
+                    code=INTERNAL_ERROR,
+                    message=f"Failed to parse Docker Hub tag info: {str(e)}",
+                )
+            )
+
+
 async def serve(custom_user_agent: str | None = None) -> None:
     """Run the pacman MCP server.
 
@@ -548,6 +751,16 @@ async def serve(custom_user_agent: str | None = None) -> None:
                 name="package_info",
                 description="Get detailed information about a specific package",
                 inputSchema=PackageInfo.model_json_schema(),
+            ),
+            Tool(
+                name="search_docker_image",
+                description="Search for Docker images in Docker Hub",
+                inputSchema=DockerImageSearch.model_json_schema(),
+            ),
+            Tool(
+                name="docker_image_info",
+                description="Get detailed information about a specific Docker image",
+                inputSchema=DockerImageInfo.model_json_schema(),
             ),
         ]
 
@@ -621,6 +834,29 @@ async def serve(custom_user_agent: str | None = None) -> None:
                     PromptArgument(
                         name="version", description="Specific version (optional)"
                     ),
+                ],
+            ),
+            Prompt(
+                name="search_docker",
+                description="Search for Docker images on Docker Hub",
+                arguments=[
+                    PromptArgument(
+                        name="query",
+                        description="Image name or search query",
+                        required=True,
+                    )
+                ],
+            ),
+            Prompt(
+                name="docker_info",
+                description="Get information about a specific Docker image",
+                arguments=[
+                    PromptArgument(
+                        name="name",
+                        description="Image name (e.g., user/repo)",
+                        required=True,
+                    ),
+                    PromptArgument(name="tag", description="Specific tag (optional)"),
                 ],
             ),
         ]
@@ -702,6 +938,53 @@ async def serve(custom_user_agent: str | None = None) -> None:
                 TextContent(
                     type="text",
                     text=f"Package information for {args.name} on {args.index}:\n{json.dumps(info, indent=2)}",
+                )
+            ]
+
+        elif name == "search_docker_image":
+            try:
+                args = DockerImageSearch(**arguments)
+                logger.debug(f"Validated docker image search args: {args}")
+            except ValueError as e:
+                logger.error(f"Invalid docker image search parameters: {str(e)}")
+                raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e)))
+
+            logger.info(f"Searching Docker Hub for '{args.query}' (limit={args.limit})")
+            results = await search_docker_hub(args.query, args.limit)
+
+            logger.info(
+                f"Found {len(results)} results for '{args.query}' on Docker Hub"
+            )
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Search results for '{args.query}' on Docker Hub:\n{json.dumps(results, indent=2)}",
+                )
+            ]
+
+        elif name == "docker_image_info":
+            try:
+                args = DockerImageInfo(**arguments)
+                logger.debug(f"Validated docker image info args: {args}")
+            except ValueError as e:
+                logger.error(f"Invalid docker image info parameters: {str(e)}")
+                raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e)))
+
+            logger.info(
+                f"Getting Docker image info for {args.name}"
+                + (f" (tag={args.tag})" if args.tag else "")
+            )
+
+            if args.tag:
+                info = await get_docker_hub_tag_info(args.name, args.tag)
+            else:
+                info = await get_docker_hub_tags(args.name)
+
+            logger.info(f"Successfully retrieved Docker image info for {args.name}")
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Docker image information for {args.name}:\n{json.dumps(info, indent=2)}",
                 )
             ]
 
@@ -912,6 +1195,74 @@ async def serve(custom_user_agent: str | None = None) -> None:
             except McpError as e:
                 return GetPromptResult(
                     description=f"Failed to get information for {package_name}",
+                    messages=[
+                        PromptMessage(
+                            role="user", content=TextContent(type="text", text=str(e))
+                        )
+                    ],
+                )
+
+        elif name == "search_docker":
+            if not arguments or "query" not in arguments:
+                raise McpError(
+                    ErrorData(code=INVALID_PARAMS, message="Search query is required")
+                )
+
+            query = arguments["query"]
+            try:
+                results = await search_docker_hub(query, 5)
+                return GetPromptResult(
+                    description=f"Search results for '{query}' on Docker Hub",
+                    messages=[
+                        PromptMessage(
+                            role="user",
+                            content=TextContent(
+                                type="text",
+                                text=f"Results for '{query}':\n{json.dumps(results, indent=2)}",
+                            ),
+                        )
+                    ],
+                )
+            except McpError as e:
+                return GetPromptResult(
+                    description=f"Failed to search for '{query}'",
+                    messages=[
+                        PromptMessage(
+                            role="user", content=TextContent(type="text", text=str(e))
+                        )
+                    ],
+                )
+
+        elif name == "docker_info":
+            if not arguments or "name" not in arguments:
+                raise McpError(
+                    ErrorData(code=INVALID_PARAMS, message="Image name is required")
+                )
+
+            image_name = arguments["name"]
+            tag = arguments.get("tag")
+
+            try:
+                if tag:
+                    info = await get_docker_hub_tag_info(image_name, tag)
+                else:
+                    info = await get_docker_hub_tags(image_name)
+
+                return GetPromptResult(
+                    description=f"Information for {image_name} on Docker Hub",
+                    messages=[
+                        PromptMessage(
+                            role="user",
+                            content=TextContent(
+                                type="text",
+                                text=f"Image information:\n{json.dumps(info, indent=2)}",
+                            ),
+                        )
+                    ],
+                )
+            except McpError as e:
+                return GetPromptResult(
+                    description=f"Failed to get information for {image_name}",
                     messages=[
                         PromptMessage(
                             role="user", content=TextContent(type="text", text=str(e))
