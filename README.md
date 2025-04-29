@@ -7,12 +7,12 @@ A Model Context Protocol server that provides package index querying capabilitie
 ### Available Tools
 
 - `search_package` - Search for packages in package indices
-    - `index` (string, required): Package index to search ("pypi", "npm", "crates")
+    - `index` (string, required): Package index to search ("pypi", "npm", "crates", "terraform")
     - `query` (string, required): Package name or search query
     - `limit` (integer, optional): Maximum number of results to return (default: 5, max: 50)
 
 - `package_info` - Get detailed information about a specific package
-    - `index` (string, required): Package index to query ("pypi", "npm", "crates")
+    - `index` (string, required): Package index to query ("pypi", "npm", "crates", "terraform")
     - `name` (string, required): Package name
     - `version` (string, optional): Specific version to get info for (default: latest)
 
@@ -23,6 +23,9 @@ A Model Context Protocol server that provides package index querying capabilitie
 - `docker_image_info` - Get detailed information about a specific Docker image
     - `name` (string, required): Image name (e.g., user/repo or library/repo)
     - `tag` (string, optional): Specific image tag (default: latest)
+    
+- `terraform_module_latest_version` - Get the latest version of a Terraform module
+    - `name` (string, required): Module name (format: namespace/name/provider)
 
 ### Prompts
 
@@ -69,6 +72,21 @@ A Model Context Protocol server that provides package index querying capabilitie
   - Arguments:
     - `name` (string, required): Image name (e.g., user/repo)
     - `tag` (string, optional): Specific tag
+    
+- **search_terraform**
+  - Search for Terraform modules in the Terraform Registry
+  - Arguments:
+    - `query` (string, required): Module name or search query
+
+- **terraform_info**
+  - Get information about a specific Terraform module
+  - Arguments:
+    - `name` (string, required): Module name (format: namespace/name/provider)
+    
+- **terraform_latest_version**
+  - Get the latest version of a specific Terraform module
+  - Arguments:
+    - `name` (string, required): Module name (format: namespace/name/provider)
 
 ## Installation
 
@@ -271,7 +289,8 @@ src/mcp_server_pacman/
 │   ├── pypi.py         # PyPI API functions
 │   ├── npm.py          # npm API functions
 │   ├── crates.py       # crates.io API functions
-│   └── dockerhub.py    # Docker Hub API functions
+│   ├── dockerhub.py    # Docker Hub API functions
+│   └── terraform.py    # Terraform Registry API functions
 ├── utils/              # Utilities and helpers
 │   ├── cache.py        # Caching functionality
 │   ├── constants.py    # Shared constants
