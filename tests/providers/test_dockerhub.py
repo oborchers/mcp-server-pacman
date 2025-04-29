@@ -1,60 +1,22 @@
+"""Tests for Docker Hub provider functions."""
+
 import unittest
-import asyncio
 from unittest.mock import patch, MagicMock, AsyncMock
 
-from src.mcp_server_pacman.server import (
+from src.mcp_server_pacman.providers.dockerhub import (
     search_docker_hub,
     get_docker_hub_tags,
     get_docker_hub_tag_info,
-    DockerImageSearch,
-    DockerImageInfo,
 )
 from mcp.shared.exceptions import McpError
 from mcp.types import INTERNAL_ERROR
 
+from tests.utils.test_utils import async_test
 
 # Disable caching for tests
-import src.mcp_server_pacman.server
+import src.mcp_server_pacman.utils.cache
 
-src.mcp_server_pacman.server.ENABLE_CACHE = False
-
-
-# Helper to run async tests properly
-def async_test(coroutine):
-    def wrapper(*args, **kwargs):
-        asyncio.run(coroutine(*args, **kwargs))
-
-    return wrapper
-
-
-class TestDockerModels(unittest.TestCase):
-    """Tests for the DockerImageSearch and DockerImageInfo models."""
-
-    def test_docker_image_search_valid(self):
-        # Test valid docker image search
-        search = DockerImageSearch(query="nginx", limit=10)
-        self.assertEqual(search.query, "nginx")
-        self.assertEqual(search.limit, 10)
-
-    def test_docker_image_search_invalid_limit(self):
-        # Test invalid limit (too high)
-        with self.assertRaises(ValueError):
-            DockerImageSearch(query="nginx", limit=100)
-
-        # Test invalid limit (too low)
-        with self.assertRaises(ValueError):
-            DockerImageSearch(query="nginx", limit=0)
-
-    def test_docker_image_info_valid(self):
-        # Test valid docker image info
-        info = DockerImageInfo(name="nginx")
-        self.assertEqual(info.name, "nginx")
-        self.assertIsNone(info.tag)
-
-        # Test with tag
-        info = DockerImageInfo(name="nginx", tag="1.25.0")
-        self.assertEqual(info.name, "nginx")
-        self.assertEqual(info.tag, "1.25.0")
+src.mcp_server_pacman.utils.cache.ENABLE_CACHE = False
 
 
 class TestDockerHubFunctions(unittest.TestCase):

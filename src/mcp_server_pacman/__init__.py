@@ -1,8 +1,55 @@
+"""MCP Server for package index searching capabilities.
+
+This package provides a Model Context Protocol (MCP) server that enables
+querying package repositories like PyPI, npm, crates.io, and Docker Hub.
+"""
+
 import sys
 import asyncio
 import argparse
 from loguru import logger
 from .server import serve
+
+
+# For backward compatibility, re-export all model classes
+from .models import PackageSearch, PackageInfo, DockerImageSearch, DockerImageInfo
+
+# For backward compatibility, re-export all provider functions
+from .providers import (
+    search_pypi,
+    get_pypi_info,
+    search_npm,
+    get_npm_info,
+    search_crates,
+    get_crates_info,
+    search_docker_hub,
+    get_docker_hub_tags,
+    get_docker_hub_tag_info,
+)
+
+# For backward compatibility, re-export utility functions
+from .utils import ENABLE_CACHE, DEFAULT_USER_AGENT
+
+
+__all__ = [
+    "serve",
+    "main",
+    "PackageSearch",
+    "PackageInfo",
+    "DockerImageSearch",
+    "DockerImageInfo",
+    "search_pypi",
+    "get_pypi_info",
+    "search_npm",
+    "get_npm_info",
+    "search_crates",
+    "get_crates_info",
+    "search_docker_hub",
+    "get_docker_hub_tags",
+    "get_docker_hub_tag_info",
+    "ENABLE_CACHE",
+    "DEFAULT_USER_AGENT",
+]
 
 
 def main():

@@ -3,37 +3,29 @@ Integration tests for Docker Hub API calls.
 
 These tests make real API calls to Docker Hub.
 Run these tests with:
-    uv run pytest -xvs tests/test_docker_integration.py
+    uv run pytest -xvs tests/integration/test_dockerhub_integration.py
 
 NOTE: These tests should NOT be run in CI/CD pipelines as they depend on
 external services and may be rate-limited or fail due to network issues.
 """
 
-import asyncio
 import sys
 import os
 
-# Add the src directory to the path so we can import modules from there
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../")))
+# Add the src directory to the path if needed
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
 
-from src.mcp_server_pacman.server import (
+from src.mcp_server_pacman.providers.dockerhub import (
     search_docker_hub,
     get_docker_hub_tags,
     get_docker_hub_tag_info,
 )
+from tests.utils.test_utils import async_test
 
 # Make sure caching is enabled for integration tests
-import src.mcp_server_pacman.server
+import src.mcp_server_pacman.utils.cache
 
-src.mcp_server_pacman.server.ENABLE_CACHE = True
-
-
-# Helper to run async tests
-def async_test(coroutine):
-    def wrapper(*args, **kwargs):
-        asyncio.run(coroutine(*args, **kwargs))
-
-    return wrapper
+src.mcp_server_pacman.utils.cache.ENABLE_CACHE = True
 
 
 class TestDockerHubIntegration:
