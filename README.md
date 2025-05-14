@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/oborchers-mcp-server-pacman-badge.png)](https://mseep.ai/app/oborchers-mcp-server-pacman)
+
 ![Pacman Logo](media/logo.png)
 
 # Pacman MCP Server
